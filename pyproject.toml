@@ -1,0 +1,21 @@
+[project]
+name = "geometric-constraint-playground"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "jax>=0.7.0",
+    "matplotlib>=3.10.3",
+    "numpy>=2.3.1",
+    "ruff>=0.12.5",
+    "scipy>=1.16.0",
+    "z3-solver>=4.15.1.0",
+]
+
+[tool.uv.workspace]
+members = ["newton"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["src/tests"]
