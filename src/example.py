@@ -8,7 +8,10 @@ from newton.constraints import (
     PointPointDistance,
 )
 from newton.primitives import Line, Point
-from newton.solver import Solver2D
+from newton.solver_dense import Solver2DDense
+from newton.solver_sparse import Solver2DSparse
+
+USE_SPARSE = False
 
 
 def draw_point(point: Point, color: str, prime: bool = False):
@@ -95,6 +98,7 @@ if __name__ == "__main__":
     plot_geometry(all_points, all_lines, color="red", label="Initial")
 
     # Sooooooolve it.
+    Solver2D = Solver2DSparse if USE_SPARSE else Solver2DDense
     solver = Solver2D(all_points, all_constraints)
     solver.solve()
 

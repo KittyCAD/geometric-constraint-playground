@@ -1,9 +1,9 @@
+from abc import ABC, abstractmethod
 from typing import Any, Dict, List, Sequence
 
 import networkx as nx
 import numpy as np
-from scipy.optimize import least_squares
-from scipy.sparse import lil_matrix
+from scipy.optimize import OptimizeResult
 
 from newton.constraints import BaseConstraint, Constraint, PointFixed
 from newton.primitives import Point
@@ -15,7 +15,7 @@ if DEBUG_LOG:
     np.set_printoptions(precision=3, suppress=True, linewidth=120)
 
 
-class Solver2D:
+class Solver2D(ABC):
     def __init__(self, points: List[Point], constraints: List[Constraint]):
         self.points = points
         self.constraints: Sequence[BaseConstraint] = constraints
@@ -113,117 +113,36 @@ class Solver2D:
 
         return subproblems
 
-    def build_sparse_jacobian(
-        self,
-        subproblem: Dict[str, Any],
-        var_map: Dict[str, int],
-        positions: Dict[str, np.ndarray],
-    ) -> lil_matrix:
-        constraints: List[BaseConstraint] = subproblem["constraints"]
-        n_residuals = sum(c.get_residual_dim() for c in constraints)
-        n_vars = len(var_map)
-
-        jacobian = lil_matrix((n_residuals, n_vars))
-        current_row = 0
-
-        for constraint in constraints:
-            entries = constraint.get_jacobian_section(positions)
-
-            for point_id, coord, value, residual_idx in entries:
-                var_name = f"{point_id}_{coord}"
-                if var_name in var_map:
-                    col_idx = var_map[var_name]
-                    jacobian[current_row + residual_idx, col_idx] += value
-
-            current_row += constraint.get_residual_dim()
-
-        if DEBUG_LOG:
-            print("Jacobian:")
-            print(jacobian.toarray())
-
-        return jacobian.tocsc()
-
-    def solve_subproblem(self, subproblem: Dict[str, Any]):
-        free_points: List[Point] = subproblem["free_points"]
-        constraints: List[BaseConstraint] = subproblem["constraints"]
-
-        if DEBUG_LOG:
-            point_ids = [p.id for p in free_points]
-            print(f"Solving Subproblem: {point_ids}")
-
-        initial_guess = np.array([[p.x, p.y] for p in free_points]).flatten()
-        var_map = {
-            f"{p.id}_{coord}": i * 2 + j
-            for i, p in enumerate(free_points)
-            for j, coord in enumerate(["x", "y"])
-        }
-
-        def get_all_positions(free_vars: np.ndarray) -> Dict[str, np.ndarray]:
-            positions = {p.id: np.array([p.x, p.y]) for p in self.points}
-            for i, p in enumerate(free_points):
-                positions[p.id] = free_vars[i * 2 : i * 2 + 2]
-            return positions
-
-        def residuals_vector(free_vars: np.ndarray) -> np.ndarray:
-            positions = get_all_positions(free_vars)
-            residual_parts = [c.get_residual(positions) for c in constraints]
-            return np.concatenate(residual_parts)
-
-        def jacobian_wrapper(free_vars: np.ndarray) -> lil_matrix:
-            positions = get_all_positions(free_vars)
-            return self.build_sparse_jacobian(subproblem, var_map, positions)
-
-        if DEBUG_LOG:
-            print(
-                f"Solving for {len(free_points)} free points: {[p.id for p in free_points]}"
-            )
-            print(f"Initial guess: {initial_guess}")
-
-        # Actual solve magic using the least_squares method.
-        # Not sure which is most appropriate here... CC Dave Reeves: current thinking
-        # Levenberg-Marquardt (lm) is good because least squares and Newton's method.
-        # TRF is on the only supported method for sparse Jacobians.
-        result = least_squares(
-            fun=residuals_vector,
-            x0=initial_guess,
-            jac=jacobian_wrapper,  # type: ignore
-            method="trf",
-            xtol=SOLVE_TOLERANCE,
-            ftol=SOLVE_TOLERANCE,
-            gtol=SOLVE_TOLERANCE,
-            verbose=2 if DEBUG_LOG else 0,
-        )
-
+    def update_points_from_result(
+        self, result: OptimizeResult, free_points: List[Point]
+    ):
         if result.success:
-            # Check that all constraints are satisfied within the tolerance.
-            final_residuals = result.fun
-            max_error = np.max(np.abs(final_residuals))
-
+            max_error = np.max(np.abs(result.fun))
             if max_error > SOLVE_TOLERANCE:
-                raise ValueError(
-                    f"Solver failed to meet tolerance. "
-                    f"Max error: {max_error} > Tolerance: {SOLVE_TOLERANCE}"
-                )
+                raise ValueError(f"Solver failed tolerance. Max error: {max_error}")
 
-            # If passed, update the points with the new positions.
             final_vars = result.x
             for i, p in enumerate(free_points):
                 p.x, p.y = final_vars[i * 2], final_vars[i * 2 + 1]
         else:
             raise ValueError(f"Solver failed to find a solution: {result.message}")
 
+    @abstractmethod
+    def solve_subproblem(self, subproblem: Dict[str, Any]):
+        # Each concrete solver must implement its own subproblem solving logic.
+        pass
+
     def solve(self):
         if not self.free_points:
             print("No free points to solve for. System is fully constrained or empty.")
             return
 
-        # Build the dependency graph to understand the structure of the problem.
         graph = self.build_dependency_graph()
         subproblems = self.analyze_structure(graph)
 
         if DEBUG_LOG:
             print(f"Graph analysis found {len(subproblems)} subproblem(s).")
+            print(f"Using {self.__class__.__name__}.")
 
-        # Solve each independent subproblem sequentially.
         for subproblem in subproblems:
             self.solve_subproblem(subproblem)
