@@ -10,7 +10,6 @@ from newton.primitives import Line, Point
 from newton.solver import Solver2D
 
 if __name__ == "__main__":
-    # Throw some points down.
     p1 = Point(x=1.0, y=1.0, id="P1")
     p2 = Point(x=4.5, y=1.5, id="P2")
     p3 = Point(x=4.0, y=3.5, id="P3")
@@ -25,7 +24,7 @@ if __name__ == "__main__":
     lines = [l_bottom, l_right, l_top, l_left]
 
     constraints = [
-        # Anchor one corner.
+        #  Anchor one corner.
         PointFixed(point=p1),
         # Make the top and bottom sides horizontal.
         LineHorizontal(line=l_bottom),
@@ -51,7 +50,6 @@ if __name__ == "__main__":
     # Plot initial state.
     plt.figure(figsize=(8, 8))
     plot_shape(points, color="red", label="Initial")
-    plt.show(block=False)
 
     # Sooooooolve it.
     solver = Solver2D(points, constraints)
@@ -66,6 +64,4 @@ if __name__ == "__main__":
     plt.ylabel("Y")
     plt.axis("equal")
     plt.grid(True)
-    plt.show(block=False)
-
-    x = 1
+    plt.show()
