@@ -42,7 +42,7 @@ class Solver2DDense(Solver2D):
             fun=jit_residuals,
             x0=initial_guess,
             jac=jit_jacobian,  # type: ignore
-            method="lm",
+            method="trf",
             xtol=SOLVE_TOLERANCE,
             ftol=SOLVE_TOLERANCE,
             gtol=SOLVE_TOLERANCE,
