@@ -86,6 +86,10 @@ if __name__ == "__main__":
         LineVertical(line=l_right2),
         PointPointDistance(p5, p6, distance=4.0),
         PointPointDistance(p5, p8, distance=4.0),
+        # Add a duplicate constraint to test conflict detection.
+        # PointPointDistance(p5, p6, distance=4.0),  # Duplicate#
+        # Add a conflicting constraint to test conflict detection.
+        LineHorizontal(line=l_right2),  # This should conflict with the vertical line.
     ]
 
     # Combine all geometry and constraints for the solver

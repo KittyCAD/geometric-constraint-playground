@@ -6,6 +6,7 @@ import numpy as np
 from scipy.optimize import OptimizeResult
 
 from newton.constraints import BaseConstraint, Constraint, PointFixed
+from newton.preprocessor import Preprocessor
 from newton.primitives import Point
 
 SOLVE_TOLERANCE = 1e-8
@@ -127,6 +128,19 @@ class Solver2D(ABC):
         else:
             raise ValueError(f"Solver failed to find a solution: {result.message}")
 
+    def validate_subproblems(self, subproblems: List[Dict[str, Any]]) -> None:
+        preprocessor = Preprocessor()
+
+        if DEBUG_LOG:
+            print("Validating constraints for each subproblem...")
+
+        for i, subproblem in enumerate(subproblems):
+            # The preprocessor will raise a ConflictError if any issues are found.
+            # If it returns, the subproblem's constraints are considered valid.
+            preprocessor.run(subproblem["constraints"])
+            if DEBUG_LOG:
+                print(f"  - Subproblem {i + 1} is valid.")
+
     @abstractmethod
     def solve_subproblem(self, subproblem: Dict[str, Any]):
         # Each concrete solver must implement its own subproblem solving logic.
@@ -137,11 +151,16 @@ class Solver2D(ABC):
             print("No free points to solve for. System is fully constrained or empty.")
             return
 
+        # Split the problem into independent subproblems.
         graph = self.build_dependency_graph()
         subproblems = self.analyze_structure(graph)
 
+        # Validate the constraints in each subproblem before solving.
+        self.validate_subproblems(subproblems)
+
+        # If validation passes, proceed with the numerical solve.
         if DEBUG_LOG:
-            print(f"Graph analysis found {len(subproblems)} subproblem(s).")
+            print(f"Graph analysis found {len(subproblems)} valid subproblem(s).")
             print(f"Using {self.__class__.__name__}.")
 
         for subproblem in subproblems:

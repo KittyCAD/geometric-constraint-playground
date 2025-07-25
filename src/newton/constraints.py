@@ -26,6 +26,10 @@ class BaseConstraint(ABC):
     def get_residual_dim(self) -> int:
         return 1
 
+    @abstractmethod
+    def get_involved_primitive_ids(self) -> frozenset:
+        pass
+
 
 @dataclass
 class PointFixed(BaseConstraint):
@@ -48,6 +52,9 @@ class PointFixed(BaseConstraint):
             (self.point.id, "x", 1.0, 0),
             (self.point.id, "y", 1.0, 1),
         ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset([self.point.id])
 
 
 @dataclass
@@ -82,6 +89,9 @@ class PointPointDistance(BaseConstraint):
             (self.p2.id, "y", -deriv_y, 0),
         ]
 
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset([self.p1.id, self.p2.id])
+
 
 @dataclass
 class LinesParallel(BaseConstraint):
@@ -109,6 +119,18 @@ class LinesParallel(BaseConstraint):
             (self.line2.p2.id, "y", float(v1[0]), 0),
         ]
 
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset(
+            [
+                self.line1.id,
+                self.line2.id,
+                self.line1.p1.id,
+                self.line1.p2.id,
+                self.line2.p1.id,
+                self.line2.p2.id,
+            ]
+        )
+
 
 @dataclass
 class LinesPerpendicular(BaseConstraint):
@@ -135,6 +157,18 @@ class LinesPerpendicular(BaseConstraint):
             (self.line2.p2.id, "x", float(v1[0]), 0),
             (self.line2.p2.id, "y", float(v1[1]), 0),
         ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset(
+            [
+                self.line1.id,
+                self.line2.id,
+                self.line1.p1.id,
+                self.line1.p2.id,
+                self.line2.p1.id,
+                self.line2.p2.id,
+            ]
+        )
 
 
 @dataclass
@@ -250,6 +284,18 @@ class LineLineAngle(BaseConstraint):
 
         return result
 
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset(
+            [
+                self.line1.id,
+                self.line2.id,
+                self.line1.p1.id,
+                self.line1.p2.id,
+                self.line2.p1.id,
+                self.line2.p2.id,
+            ]
+        )
+
 
 @dataclass
 class LineHorizontal(BaseConstraint):
@@ -268,6 +314,9 @@ class LineHorizontal(BaseConstraint):
             (self.line.p2.id, "y", -1.0, 0),
         ]
 
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset([self.line.id, self.line.p1.id, self.line.p2.id])
+
 
 @dataclass
 class LineVertical(BaseConstraint):
@@ -285,6 +334,9 @@ class LineVertical(BaseConstraint):
             (self.line.p1.id, "x", 1.0, 0),
             (self.line.p2.id, "x", -1.0, 0),
         ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset([self.line.id, self.line.p1.id, self.line.p2.id])
 
 
 Constraint = Union[
