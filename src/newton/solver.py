@@ -1,4 +1,4 @@
-from typing import List
+from typing import Any, Dict, List
 
 import jax
 import jax.numpy as jnp
@@ -29,7 +29,6 @@ class Solver2D:
         self.constraints = constraints
         self.free_points = self.identify_free_points()
         self.point_map = {p.id: p for p in self.points}
-        self.free_point_indices = {p.id: i for i, p in enumerate(self.free_points)}
 
     def identify_free_points(self) -> List[Point]:
         # Find the non-fixed points our solver can play tunes with.
@@ -53,7 +52,7 @@ class Solver2D:
         # Add constraint nodes and edges
         for i, c in enumerate(self.constraints):
             constraint_id = f"C_{i}_{type(c).__name__}"
-            graph.add_node(constraint_id, bipartite=1)
+            graph.add_node(constraint_id, bipartite=1, constraint_index=i)
 
             # Find which points this constraint depends on.
             points_involved = []
@@ -83,34 +82,56 @@ class Solver2D:
 
         return graph
 
-    def solve(self):
-        if not self.free_points:
-            print("No free points to solve for. System is fully constrained or empty.")
-            return None
+    def analyze_structure(self, graph: nx.Graph) -> List[Dict[str, Any]]:
+        # Processes the dependency graph to find and define independent subproblems.
+        subproblems = []
 
-        # Build the dependency graph to understand the structure of the problem.
-        graph = self.build_dependency_graph()
-        subproblems = list(nx.connected_components(graph))
+        for component in nx.connected_components(graph):
+            # Find all constraints that are part of this subproblem.
+            sub_constraints = [
+                self.constraints[graph.nodes[node]["constraint_index"]]
+                for node in component
+                if graph.nodes[node].get("bipartite") == 1
+            ]
+
+            # Find all free points that are part of this subproblem.
+            sub_free_point_ids = {
+                node.split("_")[0]
+                for node in component
+                if graph.nodes[node].get("bipartite") == 0
+            }
+
+            # Only create a subproblem if it has variables to solve for.
+            if not sub_free_point_ids:
+                continue
+
+            sub_free_points = [self.point_map[pid] for pid in sub_free_point_ids]
+            subproblems.append(
+                {"constraints": sub_constraints, "free_points": sub_free_points}
+            )
+
+        return subproblems
+
+    def solve_subproblem(self, subproblem: Dict[str, Any]):
+        # Solves a single, independent group of constraints and variables.
+        free_points = subproblem["free_points"]
+        constraints = subproblem["constraints"]
 
         if DEBUG_LOG:
-            print(f"Graph analysis found {len(subproblems)} independent subproblem(s).")
+            point_ids = [p.id for p in free_points]
+            print(f"Solving Subproblem: {point_ids}")
 
-        if not self.free_points:
-            print("No free points to solve for. System is fully constrained or empty.")
-            return None
+        # Create the initial guess vector from the current positions of relevant free points.
+        initial_guess = np.array([[p.x, p.y] for p in free_points]).flatten()
 
-        # Create the initial guess vector from the current positions of free points.
-        initial_guess = np.array([[p.x, p.y] for p in self.free_points]).flatten()
+        def get_all_positions(subproblem_free_vars: jnp.ndarray) -> dict:
+            # Create a dictionary of all point positions for the residual functions.
+            # Start with the current state of all points.
+            positions = {p.id: jnp.array([p.x, p.y]) for p in self.points}
 
-        def get_all_positions(free_vars: jnp.ndarray) -> dict:
-            # Array to dict.
-            positions = {}
-            for p in self.points:
-                if p not in self.free_points:
-                    positions[p.id] = jnp.array([p.x, p.y])
-
-            for i, p in enumerate(self.free_points):
-                positions[p.id] = free_vars[i * 2 : i * 2 + 2]
+            # Overwrite the positions of the points being solved in this subproblem.
+            for i, p in enumerate(free_points):
+                positions[p.id] = subproblem_free_vars[i * 2 : i * 2 + 2]
 
             return positions
 
@@ -118,9 +139,7 @@ class Solver2D:
             # This function returns a flat vector of all constraint residuals.
             # We don't need to worry about doing residual squaring here.
             positions = get_all_positions(free_vars)
-
-            # Compute all residual parts and concatenate them into a single vector.
-            residual_parts = [compute_residual(c, positions) for c in self.constraints]
+            residual_parts = [compute_residual(c, positions) for c in constraints]
             return jnp.concatenate([jnp.atleast_1d(res) for res in residual_parts])
 
         # JIT compile the residuals function and its Jacobian.
@@ -141,9 +160,9 @@ class Solver2D:
             x0=initial_guess,
             jac=jit_jacobian,  # type: ignore
             method="lm",
-            xtol=1e-10,
-            ftol=1e-10,
-            gtol=1e-10,
+            xtol=SOLVE_TOLERANCE,
+            ftol=SOLVE_TOLERANCE,
+            gtol=SOLVE_TOLERANCE,
             verbose=2 if DEBUG_LOG else 0,
         )
 
@@ -160,8 +179,23 @@ class Solver2D:
 
             # If passed, update the points with the new positions.
             final_vars = result.x
-            for i, p in enumerate(self.free_points):
+            for i, p in enumerate(free_points):
                 p.x, p.y = final_vars[i * 2], final_vars[i * 2 + 1]
         else:
             raise ValueError(f"Solver failed to find a solution: {result.message}")
-        return result
+
+    def solve(self):
+        if not self.free_points:
+            print("No free points to solve for. System is fully constrained or empty.")
+            return
+
+        # Build the dependency graph to understand the structure of the problem.
+        graph = self.build_dependency_graph()
+        subproblems = self.analyze_structure(graph)
+
+        if DEBUG_LOG:
+            print(f"Graph analysis found {len(subproblems)} subproblem(s).")
+
+        # Solve each independent subproblem sequentially.
+        for subproblem in subproblems:
+            self.solve_subproblem(subproblem)
