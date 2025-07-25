@@ -1,32 +1,24 @@
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
-import jax
-import jax.numpy as jnp
 import networkx as nx
 import numpy as np
 from scipy.optimize import least_squares
+from scipy.sparse import lil_matrix
 
-from newton.constraints import (
-    Constraint,
-    LineHorizontal,
-    LineLineAngle,
-    LinesParallel,
-    LinesPerpendicular,
-    LineVertical,
-    PointFixed,
-    PointPointDistance,
-)
+from newton.constraints import BaseConstraint, Constraint, PointFixed
 from newton.primitives import Point
-from newton.residuals import compute_residual
 
-SOLVE_TOLERANCE = 1e-10
+SOLVE_TOLERANCE = 1e-8
 DEBUG_LOG = True
+
+if DEBUG_LOG:
+    np.set_printoptions(precision=3, suppress=True, linewidth=120)
 
 
 class Solver2D:
     def __init__(self, points: List[Point], constraints: List[Constraint]):
         self.points = points
-        self.constraints = constraints
+        self.constraints: Sequence[BaseConstraint] = constraints
         self.free_points = self.identify_free_points()
         self.point_map = {p.id: p for p in self.points}
 
@@ -56,6 +48,15 @@ class Solver2D:
 
             # Find which points this constraint depends on.
             points_involved = []
+
+            from newton.constraints import (
+                LineHorizontal,
+                LineLineAngle,
+                LinesParallel,
+                LinesPerpendicular,
+                LineVertical,
+                PointPointDistance,
+            )
 
             match c:
                 case PointFixed():
@@ -87,12 +88,12 @@ class Solver2D:
         subproblems = []
 
         for component in nx.connected_components(graph):
-            # Find all constraints that are part of this subproblem.
-            sub_constraints = [
-                self.constraints[graph.nodes[node]["constraint_index"]]
+            sub_constraint_indices = {
+                graph.nodes[node]["constraint_index"]
                 for node in component
                 if graph.nodes[node].get("bipartite") == 1
-            ]
+            }
+            sub_constraints = [self.constraints[i] for i in sub_constraint_indices]
 
             # Find all free points that are part of this subproblem.
             sub_free_point_ids = {
@@ -112,54 +113,81 @@ class Solver2D:
 
         return subproblems
 
+    def build_sparse_jacobian(
+        self,
+        subproblem: Dict[str, Any],
+        var_map: Dict[str, int],
+        positions: Dict[str, np.ndarray],
+    ) -> lil_matrix:
+        constraints: List[BaseConstraint] = subproblem["constraints"]
+        n_residuals = sum(c.get_residual_dim() for c in constraints)
+        n_vars = len(var_map)
+
+        jacobian = lil_matrix((n_residuals, n_vars))
+        current_row = 0
+
+        for constraint in constraints:
+            entries = constraint.get_jacobian_section(positions)
+
+            for point_id, coord, value, residual_idx in entries:
+                var_name = f"{point_id}_{coord}"
+                if var_name in var_map:
+                    col_idx = var_map[var_name]
+                    jacobian[current_row + residual_idx, col_idx] += value
+
+            current_row += constraint.get_residual_dim()
+
+        if DEBUG_LOG:
+            print("Jacobian:")
+            print(jacobian.toarray())
+
+        return jacobian.tocsc()
+
     def solve_subproblem(self, subproblem: Dict[str, Any]):
-        # Solves a single, independent group of constraints and variables.
-        free_points = subproblem["free_points"]
-        constraints = subproblem["constraints"]
+        free_points: List[Point] = subproblem["free_points"]
+        constraints: List[BaseConstraint] = subproblem["constraints"]
 
         if DEBUG_LOG:
             point_ids = [p.id for p in free_points]
             print(f"Solving Subproblem: {point_ids}")
 
-        # Create the initial guess vector from the current positions of relevant free points.
         initial_guess = np.array([[p.x, p.y] for p in free_points]).flatten()
+        var_map = {
+            f"{p.id}_{coord}": i * 2 + j
+            for i, p in enumerate(free_points)
+            for j, coord in enumerate(["x", "y"])
+        }
 
-        def get_all_positions(subproblem_free_vars: jnp.ndarray) -> dict:
-            # Create a dictionary of all point positions for the residual functions.
-            # Start with the current state of all points.
-            positions = {p.id: jnp.array([p.x, p.y]) for p in self.points}
-
-            # Overwrite the positions of the points being solved in this subproblem.
+        def get_all_positions(free_vars: np.ndarray) -> Dict[str, np.ndarray]:
+            positions = {p.id: np.array([p.x, p.y]) for p in self.points}
             for i, p in enumerate(free_points):
-                positions[p.id] = subproblem_free_vars[i * 2 : i * 2 + 2]
-
+                positions[p.id] = free_vars[i * 2 : i * 2 + 2]
             return positions
 
-        def residuals_vector(free_vars: jnp.ndarray) -> jnp.ndarray:
-            # This function returns a flat vector of all constraint residuals.
-            # We don't need to worry about doing residual squaring here.
+        def residuals_vector(free_vars: np.ndarray) -> np.ndarray:
             positions = get_all_positions(free_vars)
-            residual_parts = [compute_residual(c, positions) for c in constraints]
-            return jnp.concatenate([jnp.atleast_1d(res) for res in residual_parts])
+            residual_parts = [c.get_residual(positions) for c in constraints]
+            return np.concatenate(residual_parts)
 
-        # JIT compile the residuals function and its Jacobian.
-        jit_residuals = jax.jit(residuals_vector)
-        jit_jacobian = jax.jit(jax.jacfwd(residuals_vector))
+        def jacobian_wrapper(free_vars: np.ndarray) -> lil_matrix:
+            positions = get_all_positions(free_vars)
+            return self.build_sparse_jacobian(subproblem, var_map, positions)
 
         if DEBUG_LOG:
             print(
-                f"Solving for {len(self.free_points)} free points: {[p.id for p in self.free_points]}"
+                f"Solving for {len(free_points)} free points: {[p.id for p in free_points]}"
             )
             print(f"Initial guess: {initial_guess}")
 
         # Actual solve magic using the least_squares method.
         # Not sure which is most appropriate here... CC Dave Reeves: current thinking
         # Levenberg-Marquardt (lm) is good because least squares and Newton's method.
+        # TRF is on the only supported method for sparse Jacobians.
         result = least_squares(
-            fun=jit_residuals,
+            fun=residuals_vector,
             x0=initial_guess,
-            jac=jit_jacobian,  # type: ignore
-            method="lm",
+            jac=jacobian_wrapper,  # type: ignore
+            method="trf",
             xtol=SOLVE_TOLERANCE,
             ftol=SOLVE_TOLERANCE,
             gtol=SOLVE_TOLERANCE,
