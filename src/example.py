@@ -1,16 +1,15 @@
 import matplotlib.pyplot as plt
 
 from newton.constraints import (
-    HorizontalConstraint,
+    LineHorizontal,
+    LineVertical,
     PointFixed,
     PointPointDistance,
-    VerticalConstraint,
 )
 from newton.primitives import Line, Point
 from newton.solver import Solver2D
 
 if __name__ == "__main__":
-    # Throw some points down.
     p1 = Point(x=1.0, y=1.0, id="P1")
     p2 = Point(x=4.5, y=1.5, id="P2")
     p3 = Point(x=4.0, y=3.5, id="P3")
@@ -28,14 +27,14 @@ if __name__ == "__main__":
         #  Anchor one corner.
         PointFixed(point=p1),
         # Make the top and bottom sides horizontal.
-        HorizontalConstraint(line=l_bottom),
-        HorizontalConstraint(line=l_top),
+        LineHorizontal(line=l_bottom),
+        LineHorizontal(line=l_top),
         # Make the left and right sides vertical.
-        VerticalConstraint(line=l_left),
-        VerticalConstraint(line=l_right),
+        LineVertical(line=l_left),
+        LineVertical(line=l_right),
         # Define the width and height of the box.
         PointPointDistance(p1, p2, distance=4.0),
-        PointPointDistance(p1, p4, distance=2.0),
+        PointPointDistance(p1, p4, distance=3.0),
     ]
 
     def plot_shape(points, color, label, prime=False):
