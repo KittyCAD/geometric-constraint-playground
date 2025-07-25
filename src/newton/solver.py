@@ -5,17 +5,9 @@ import jax.numpy as jnp
 import numpy as np
 from scipy.optimize import least_squares
 
-from newton.constraints import (
-    Constraint,
-    HorizontalConstraint,
-    LineLineAngle,
-    LinesParallel,
-    LinesPerpendicular,
-    PointFixed,
-    PointPointDistance,
-    VerticalConstraint,
-)
+from newton.constraints import Constraint, PointFixed
 from newton.primitives import Point
+from newton.residuals import compute_residual
 
 SOLVE_TOLERANCE = 1e-10
 DEBUG_LOG = True
@@ -62,29 +54,10 @@ class Solver2D:
             # This function returns a flat vector of all constraint residuals.
             # We don't need to worry about doing residual squaring here.
             positions = get_all_positions(free_vars)
-            all_residuals = []
 
-            for c in self.constraints:
-                if isinstance(c, PointFixed):
-                    res = c.residual(positions[c.point.id])
-                    all_residuals.extend(res)
-                elif isinstance(c, PointPointDistance):
-                    res = c.residual(positions[c.p1.id], positions[c.p2.id])
-                    all_residuals.append(res)
-                elif isinstance(c, (LinesParallel, LinesPerpendicular, LineLineAngle)):
-                    l1_p1_pos = positions[c.line1.p1.id]
-                    l1_p2_pos = positions[c.line1.p2.id]
-                    l2_p1_pos = positions[c.line2.p1.id]
-                    l2_p2_pos = positions[c.line2.p2.id]
-                    res = c.residual(l1_p1_pos, l1_p2_pos, l2_p1_pos, l2_p2_pos)
-                    all_residuals.append(res)
-                elif isinstance(c, (HorizontalConstraint, VerticalConstraint)):
-                    p1_pos = positions[c.line.p1.id]
-                    p2_pos = positions[c.line.p2.id]
-                    res = c.residual(p1_pos, p2_pos)
-                    all_residuals.append(res)
-
-            return jnp.array(all_residuals)
+            # Compute all residual parts and concatenate them into a single vector.
+            residual_parts = [compute_residual(c, positions) for c in self.constraints]
+            return jnp.concatenate([jnp.atleast_1d(res) for res in residual_parts])
 
         # JIT compile the residuals function and its Jacobian.
         jit_residuals = jax.jit(residuals_vector)
