@@ -10,6 +10,7 @@ from newton.primitives import Line, Point
 from newton.solver import Solver2D
 
 if __name__ == "__main__":
+    # First square.
     p1 = Point(x=1.0, y=1.0, id="P1")
     p2 = Point(x=4.5, y=1.5, id="P2")
     p3 = Point(x=4.0, y=3.5, id="P3")
@@ -36,6 +37,36 @@ if __name__ == "__main__":
         PointPointDistance(p1, p2, distance=4.0),
         PointPointDistance(p1, p4, distance=3.0),
     ]
+
+    # Define a second square to check if we can identify it.
+    p5 = Point(x=2.0, y=2.0, id="P5")
+    p6 = Point(x=5.5, y=2.5, id="P6")
+    p7 = Point(x=5.0, y=4.5, id="P7")
+    p8 = Point(x=2.5, y=4.0, id="P8")
+    points.extend([p5, p6, p7, p8])
+
+    # Define lines connecting the second square points.
+    l_bottom2 = Line(p5, p6, "L_Bottom2")
+    l_right2 = Line(p6, p7, "L_Right2")
+    l_top2 = Line(p7, p8, "L_Top2")
+    l_left2 = Line(p8, p5, "L_Left2")
+    lines.extend([l_bottom2, l_right2, l_top2, l_left2])
+
+    constraints.extend(
+        [
+            # Anchor one corner of the second square.
+            PointFixed(point=p5),
+            # Make the top and bottom sides horizontal.
+            LineHorizontal(line=l_bottom2),
+            LineHorizontal(line=l_top2),
+            # Make the left and right sides vertical.
+            LineVertical(line=l_left2),
+            LineVertical(line=l_right2),
+            # Define the width and height of the second box.
+            PointPointDistance(p5, p6, distance=4.0),
+            PointPointDistance(p5, p8, distance=3.0),
+        ]
+    )
 
     def plot_shape(points, color, label, prime=False):
         plot_points = points + [points[0]]

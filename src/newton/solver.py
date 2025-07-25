@@ -90,6 +90,14 @@ class Solver2D:
 
         # Build the dependency graph to understand the structure of the problem.
         graph = self.build_dependency_graph()
+        subproblems = list(nx.connected_components(graph))
+
+        if DEBUG_LOG:
+            print(f"Graph analysis found {len(subproblems)} independent subproblem(s).")
+
+        if not self.free_points:
+            print("No free points to solve for. System is fully constrained or empty.")
+            return None
 
         # Create the initial guess vector from the current positions of free points.
         initial_guess = np.array([[p.x, p.y] for p in self.free_points]).flatten()
