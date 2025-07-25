@@ -2,10 +2,20 @@ from typing import List
 
 import jax
 import jax.numpy as jnp
+import networkx as nx
 import numpy as np
 from scipy.optimize import least_squares
 
-from newton.constraints import Constraint, PointFixed
+from newton.constraints import (
+    Constraint,
+    LineHorizontal,
+    LineLineAngle,
+    LinesParallel,
+    LinesPerpendicular,
+    LineVertical,
+    PointFixed,
+    PointPointDistance,
+)
 from newton.primitives import Point
 from newton.residuals import compute_residual
 
@@ -30,10 +40,56 @@ class Solver2D:
 
         return [p for p in self.points if p.id not in fixed_point_ids]
 
+    def build_dependency_graph(self):
+        graph = nx.Graph()
+
+        # Get all variables (the coordinates of free points the solver can play with).
+        variable_nodes = []
+        for p in self.free_points:
+            variable_nodes.extend([f"{p.id}_x", f"{p.id}_y"])
+
+        graph.add_nodes_from(variable_nodes, bipartite=0)
+
+        # Add constraint nodes and edges
+        for i, c in enumerate(self.constraints):
+            constraint_id = f"C_{i}_{type(c).__name__}"
+            graph.add_node(constraint_id, bipartite=1)
+
+            # Find which points this constraint depends on.
+            points_involved = []
+
+            match c:
+                case PointFixed():
+                    points_involved.append(c.point)
+                case PointPointDistance():
+                    points_involved.extend([c.p1, c.p2])
+                case LinesParallel() | LinesPerpendicular() | LineLineAngle():
+                    points_involved.extend(
+                        [c.line1.p1, c.line1.p2, c.line2.p1, c.line2.p2]
+                    )
+                case LineHorizontal() | LineVertical():
+                    points_involved.extend([c.line.p1, c.line.p2])
+                case _:
+                    raise ValueError(f"Unknown constraint type: {type(c)}")
+
+            # Add edges only for free points
+            unique_points_involved = {p.id: p for p in points_involved}.values()
+
+            # Add edges only for free points
+            for p in unique_points_involved:
+                if p in self.free_points:
+                    graph.add_edge(constraint_id, f"{p.id}_x")
+                    graph.add_edge(constraint_id, f"{p.id}_y")
+
+        return graph
+
     def solve(self):
         if not self.free_points:
             print("No free points to solve for. System is fully constrained or empty.")
             return None
+
+        # Build the dependency graph to understand the structure of the problem.
+        graph = self.build_dependency_graph()
 
         # Create the initial guess vector from the current positions of free points.
         initial_guess = np.array([[p.x, p.y] for p in self.free_points]).flatten()
