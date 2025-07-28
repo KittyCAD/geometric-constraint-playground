@@ -5,11 +5,23 @@ import networkx as nx
 import numpy as np
 from scipy.optimize import OptimizeResult
 
-from newton.constraints import BaseConstraint, Constraint, PointFixed
+from newton.constraints import (
+    BaseConstraint,
+    Constraint,
+    LineLength,
+    LineLineDistance,
+    LinesEqualLength,
+    PointFixed,
+    PointPointXDistance,
+    PointPointYDistance,
+)
 from newton.preprocessor import Preprocessor
 from newton.primitives import Point
+from newton.structural_analyzer import StructuralAnalyzer
 
-SOLVE_TOLERANCE = 1e-8
+SOLVE_VALIDATION_TOLERANCE = 1e-6  ## Our maximum allowed error on any constraint.
+SOLVER_CONVERGENCE_TOLERANCE = 1e-10  ## The tolerance for convergence in the solver.
+
 DEBUG_LOG = True
 
 if DEBUG_LOG:
@@ -56,20 +68,29 @@ class Solver2D(ABC):
                 LinesParallel,
                 LinesPerpendicular,
                 LineVertical,
-                PointPointDistance,
+                PointPointEuclideanDistance,
             )
 
             match c:
                 case PointFixed():
                     points_involved.append(c.point)
-                case PointPointDistance():
+                case (
+                    PointPointEuclideanDistance()
+                    | PointPointXDistance()
+                    | PointPointYDistance()
+                ):
                     points_involved.extend([c.p1, c.p2])
+
                 case LinesParallel() | LinesPerpendicular() | LineLineAngle():
                     points_involved.extend(
                         [c.line1.p1, c.line1.p2, c.line2.p1, c.line2.p2]
                     )
-                case LineHorizontal() | LineVertical():
+                case LineHorizontal() | LineVertical() | LineLength():
                     points_involved.extend([c.line.p1, c.line.p2])
+                case LinesEqualLength() | LineLineDistance():
+                    points_involved.extend(
+                        [c.line1.p1, c.line1.p2, c.line2.p1, c.line2.p2]
+                    )
                 case _:
                     raise ValueError(f"Unknown constraint type: {type(c)}")
 
@@ -121,7 +142,7 @@ class Solver2D(ABC):
     ):
         if result.success:
             max_error = np.max(np.abs(result.fun))
-            if max_error > SOLVE_TOLERANCE:
+            if max_error > SOLVE_VALIDATION_TOLERANCE:
                 raise ValueError(f"Solver failed tolerance. Max error: {max_error}")
 
             final_vars = result.x
@@ -167,5 +188,18 @@ class Solver2D(ABC):
             )
             print(f"Using {self.__class__.__name__}.")
 
-        for constraint_system in constraint_systems:
-            self.solve_constraint_system(constraint_system)
+        # Then, for each separable system, find the sequential solving order.
+        for system in constraint_systems:
+            if not system["constraints"]:
+                continue
+
+            analyzer = StructuralAnalyzer(system["constraints"], system["free_points"])
+
+            # This breaks one large problem into a sequence of smaller ones.
+            sequential_blocks = analyzer.find_solving_sequence()
+
+            # Solve the sequential blocks in the determined order.
+            for block in sequential_blocks:
+                self.solve_constraint_system(block)
+                # Note that this updates the points so we get forward substitution
+                # in the next block.

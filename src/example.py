@@ -1,11 +1,15 @@
-# %%
 import matplotlib.pyplot as plt
 
 from newton.constraints import (
     LineHorizontal,
+    LineLineDistance,
+    LinesEqualLength,
+    LinesParallel,
     LineVertical,
     PointFixed,
-    PointPointDistance,
+    PointPointEuclideanDistance,
+    PointPointXDistance,
+    PointPointYDistance,
 )
 from newton.primitives import Line, Point
 from newton.solver_dense import Solver2DDense
@@ -41,7 +45,7 @@ def plot_geometry(
         draw_point(point, color=color, prime=prime)
 
 
-if __name__ == "__main__":
+def constrain_rectangles():
     # First square
     p1 = Point(x=1.0, y=1.0, id="P1")
     p2 = Point(x=4.5, y=1.5, id="P2")
@@ -61,8 +65,8 @@ if __name__ == "__main__":
         LineHorizontal(line=l_top1),
         LineVertical(line=l_left1),
         LineVertical(line=l_right1),
-        PointPointDistance(p1, p2, distance=4.0),
-        PointPointDistance(p1, p4, distance=3.0),
+        PointPointEuclideanDistance(p1, p2, distance=4.0),
+        PointPointEuclideanDistance(p1, p4, distance=3.0),
     ]
 
     # Second square
@@ -84,12 +88,12 @@ if __name__ == "__main__":
         LineHorizontal(line=l_top2),
         LineVertical(line=l_left2),
         LineVertical(line=l_right2),
-        PointPointDistance(p5, p6, distance=4.0),
-        PointPointDistance(p5, p8, distance=4.0),
+        PointPointEuclideanDistance(p5, p6, distance=4.0),
+        PointPointEuclideanDistance(p5, p8, distance=4.0),
         # Add a duplicate constraint to test conflict detection.
         # PointPointDistance(p5, p6, distance=4.0),  # Duplicate#
         # Add a conflicting constraint to test conflict detection.
-        LineHorizontal(line=l_right2),  # This should conflict with the vertical line.
+        # LineHorizontal(line=l_right2),  # This should conflict with the vertical line.
     ]
 
     # Combine all geometry and constraints for the solver
@@ -116,3 +120,57 @@ if __name__ == "__main__":
     plt.axis("equal")
     plt.grid(True)
     plt.show()
+
+
+def constrain_decomposable():
+    """
+    Creates a system that is fully connected, but can be sequentially decomposed
+    by the StructuralAnalyzer.
+    """
+    p0 = Point(x=1.0, y=1.0, id="P0")
+    p1 = Point(x=2.5, y=1.5, id="P1")
+    p2 = Point(x=1.5, y=3.0, id="P2")
+    p3 = Point(x=3.5, y=4.0, id="P3")
+
+    line1 = Line(p0, p1, "L1")
+    line2 = Line(p2, p3, "L2")
+
+    points = [p0, p1, p2, p3]
+    lines = [line1, line2]
+
+    # Define the constraints in a specific order to show the dependency.
+    constraints = [
+        PointFixed(point=p0),
+        PointPointXDistance(p0, p1, distance=4),
+        PointPointYDistance(p0, p1, distance=9),
+        LinesParallel(line1, line2),
+        LinesEqualLength(line1, line2),
+        LineLineDistance(line1, line2, distance=2.0),
+    ]
+
+    # Plot initial state.
+    plt.figure(figsize=(8, 8))
+    plot_geometry(points, lines, color="red", label="Initial")
+
+    # Sooooooolve it.
+    Solver2D = Solver2DSparse if USE_SPARSE else Solver2DDense
+    solver = Solver2D(points, constraints)
+    solver.solve()
+
+    # Plot final state.
+    plot_geometry(points, lines, color="blue", label="Solved", prime=True)
+
+    plt.legend()
+    plt.title("Decomposable System Solved Sequentially")
+    plt.xlabel("X")
+    plt.ylabel("Y")
+    plt.axis("equal")
+    plt.grid(True)
+    plt.show()
+
+    x = 1
+
+
+if __name__ == "__main__":
+    # constrain_rectangles()
+    constrain_decomposable()

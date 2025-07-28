@@ -8,7 +8,7 @@ from scipy.optimize import least_squares
 import newton.backend as nb
 from newton.constraints import BaseConstraint
 from newton.primitives import Point
-from newton.solver_base import DEBUG_LOG, SOLVE_TOLERANCE, Solver2D
+from newton.solver_base import DEBUG_LOG, SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 
 class Solver2DDense(Solver2D):
@@ -43,9 +43,9 @@ class Solver2DDense(Solver2D):
             x0=initial_guess,
             jac=jit_jacobian,  # type: ignore
             method="trf",
-            xtol=SOLVE_TOLERANCE,
-            ftol=SOLVE_TOLERANCE,
-            gtol=SOLVE_TOLERANCE,
+            xtol=SOLVER_CONVERGENCE_TOLERANCE,
+            ftol=SOLVER_CONVERGENCE_TOLERANCE,
+            gtol=SOLVER_CONVERGENCE_TOLERANCE,
             verbose=2 if DEBUG_LOG else 0,
         )
         self.update_points_from_result(result, free_points)

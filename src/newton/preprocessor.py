@@ -8,10 +8,7 @@ from newton.constraints import (
     LineHorizontal,
     LineVertical,
 )
-
-
-class ConflictError(ValueError):
-    pass
+from newton.exceptions import ConflictError
 
 
 class Preprocessor:

@@ -58,7 +58,7 @@ class PointFixed(BaseConstraint):
 
 
 @dataclass
-class PointPointDistance(BaseConstraint):
+class PointPointEuclideanDistance(BaseConstraint):
     p1: Point
     p2: Point
     distance: float
@@ -91,6 +91,89 @@ class PointPointDistance(BaseConstraint):
 
     def get_involved_primitive_ids(self) -> frozenset:
         return frozenset([self.p1.id, self.p2.id])
+
+
+@dataclass
+class PointPointXDistance(BaseConstraint):
+    p1: Point
+    p2: Point
+    distance: float
+
+    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
+        p1_pos = positions[self.p1.id]
+        p2_pos = positions[self.p2.id]
+        return nb.np.array([abs(p1_pos[0] - p2_pos[0]) - self.distance])
+
+    def get_jacobian_section(
+        self, positions: Mapping[str, ArrayLike]
+    ) -> List[Tuple[str, str, float, int]]:
+        p1_pos, p2_pos = positions[self.p1.id], positions[self.p2.id]
+        sign = 1.0 if (p1_pos[0] - p2_pos[0]) > 0 else -1.0
+        return [
+            (self.p1.id, "x", sign, 0),
+            (self.p2.id, "x", -sign, 0),
+        ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset([self.p1.id, self.p2.id])
+
+
+@dataclass
+class PointPointYDistance(BaseConstraint):
+    p1: Point
+    p2: Point
+    distance: float
+
+    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
+        p1_pos = positions[self.p1.id]
+        p2_pos = positions[self.p2.id]
+        return nb.np.array([abs(p1_pos[1] - p2_pos[1]) - self.distance])
+
+    def get_jacobian_section(
+        self, positions: Mapping[str, ArrayLike]
+    ) -> List[Tuple[str, str, float, int]]:
+        p1_pos, p2_pos = positions[self.p1.id], positions[self.p2.id]
+        sign = 1.0 if (p1_pos[1] - p2_pos[1]) > 0 else -1.0
+        return [
+            (self.p1.id, "y", sign, 0),
+            (self.p2.id, "y", -sign, 0),
+        ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset([self.p1.id, self.p2.id])
+
+
+@dataclass
+class LineLength(BaseConstraint):
+    line: Line
+    length: float
+
+    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
+        pos1 = positions[self.line.p1.id]
+        pos2 = positions[self.line.p2.id]
+        current_dist = nb.np.linalg.norm(pos1 - pos2)
+        return nb.np.array([current_dist - self.length])
+
+    def get_jacobian_section(
+        self, positions: Mapping[str, ArrayLike]
+    ) -> List[Tuple[str, str, float, int]]:
+        # This is identical to PointPointDistance jacobian.
+        pos1, pos2 = positions[self.line.p1.id], positions[self.line.p2.id]
+        d_pos = pos1 - pos2
+        dist = np.linalg.norm(d_pos)
+        if dist < EPS:
+            return []
+        deriv_x = float(d_pos[0] / dist)
+        deriv_y = float(d_pos[1] / dist)
+        return [
+            (self.line.p1.id, "x", deriv_x, 0),
+            (self.line.p1.id, "y", deriv_y, 0),
+            (self.line.p2.id, "x", -deriv_x, 0),
+            (self.line.p2.id, "y", -deriv_y, 0),
+        ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset({self.line.id, self.line.p1.id, self.line.p2.id})
 
 
 @dataclass
@@ -339,12 +422,132 @@ class LineVertical(BaseConstraint):
         return frozenset([self.line.id, self.line.p1.id, self.line.p2.id])
 
 
+@dataclass
+class LinesEqualLength(BaseConstraint):
+    line1: Line
+    line2: Line
+
+    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
+        p0, p1 = positions[self.line1.p1.id], positions[self.line1.p2.id]
+        p2, p3 = positions[self.line2.p1.id], positions[self.line2.p2.id]
+
+        len1 = nb.np.linalg.norm(p1 - p0)
+        len2 = nb.np.linalg.norm(p3 - p2)
+
+        return nb.np.array([len1 - len2])
+
+    def get_jacobian_section(
+        self, positions: Mapping[str, ArrayLike]
+    ) -> List[Tuple[str, str, float, int]]:
+        p0, p1 = positions[self.line1.p1.id], positions[self.line1.p2.id]
+        p2, p3 = positions[self.line2.p1.id], positions[self.line2.p2.id]
+
+        d_pos1 = p1 - p0
+        dist1 = np.linalg.norm(d_pos1)
+
+        d_pos2 = p3 - p2
+        dist2 = np.linalg.norm(d_pos2)
+
+        entries = []
+        # Derivatives for line1 (positive contribution)
+        if dist1 > EPS:
+            deriv_x1 = float(d_pos1[0] / dist1)
+            deriv_y1 = float(d_pos1[1] / dist1)
+            entries.extend(
+                [
+                    (self.line1.p2.id, "x", deriv_x1, 0),
+                    (self.line1.p2.id, "y", deriv_y1, 0),
+                    (self.line1.p1.id, "x", -deriv_x1, 0),
+                    (self.line1.p1.id, "y", -deriv_y1, 0),
+                ]
+            )
+
+        # Derivatives for line2 (negative contribution)
+        if dist2 > EPS:
+            deriv_x2 = float(d_pos2[0] / dist2)
+            deriv_y2 = float(d_pos2[1] / dist2)
+            entries.extend(
+                [
+                    (self.line2.p2.id, "x", -deriv_x2, 0),
+                    (self.line2.p2.id, "y", -deriv_y2, 0),
+                    (self.line2.p1.id, "x", deriv_x2, 0),
+                    (self.line2.p1.id, "y", deriv_y2, 0),
+                ]
+            )
+
+        return entries
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset(
+            {
+                self.line1.id,
+                self.line1.p1.id,
+                self.line1.p2.id,
+                self.line2.id,
+                self.line2.p1.id,
+                self.line2.p2.id,
+            }
+        )
+
+
+@dataclass
+class LineLineDistance(BaseConstraint):
+    line1: Line
+    line2: Line
+    distance: float
+
+    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
+        # Assumes lines are parallel, enforced by a LinesParallel constraint.
+        p0, p1 = positions[self.line1.p1.id], positions[self.line1.p2.id]
+        p2 = positions[self.line2.p1.id]
+
+        v = p1 - p0
+        w = p2 - p0
+
+        # Distance = |v x w| / |v|
+        mag_v = nb.np.linalg.norm(v)
+        is_valid = mag_v > EPS
+        safe_mag_v = nb.np.where(mag_v < EPS, 1.0, mag_v)
+
+        cross_product_mag = abs(v[0] * w[1] - v[1] * w[0])
+        current_dist = cross_product_mag / safe_mag_v
+
+        return nb.np.where(
+            is_valid, nb.np.array([current_dist - self.distance]), nb.np.array([0.0])
+        )
+
+    def get_jacobian_section(
+        self, positions: Mapping[str, ArrayLike]
+    ) -> List[Tuple[str, str, float, int]]:
+        # TODO...
+        raise NotImplementedError(
+            "LineLineDistance is only supported by the dense (JAX) solver."
+        )
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset(
+            {
+                self.line1.id,
+                self.line1.p1.id,
+                self.line1.p2.id,
+                self.line2.id,
+                self.line2.p1.id,
+                self.line2.p2.id,
+            }
+        )
+
+
 Constraint = Union[
     PointFixed,
-    PointPointDistance,
+    PointPointEuclideanDistance,
+    PointPointXDistance,
+    PointPointYDistance,
+    LineLength,
     LinesParallel,
     LinesPerpendicular,
     LineLineAngle,
     LineHorizontal,
     LineVertical,
+    LinesEqualLength,
+    LineLineDistance,
 ]
