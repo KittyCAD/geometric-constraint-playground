@@ -146,6 +146,7 @@ def constrain_decomposable():
         LinesParallel(line1, line2),
         LinesEqualLength(line1, line2),
         LineLineDistance(line1, line2, distance=2.0),
+        PointPointXDistance(p0, p2, distance=1),
     ]
 
     # Plot initial state.
@@ -172,5 +173,5 @@ def constrain_decomposable():
 
 
 if __name__ == "__main__":
-    # constrain_rectangles()
-    constrain_decomposable()
+    constrain_rectangles()
+    # constrain_decomposable()

@@ -37,6 +37,8 @@ class Solver2D(ABC):
 
     def identify_free_points(self) -> List[Point]:
         # Find the non-fixed points our solver can play tunes with.
+        # However... we actually do want to feed fixed points to the structural analyzer,
+        # because they may be help in solving other parts of the system.
         fixed_point_ids = set()
         for c in self.constraints:
             if isinstance(c, PointFixed):
@@ -44,14 +46,11 @@ class Solver2D(ABC):
 
         return [p for p in self.points if p.id not in fixed_point_ids]
 
-    def build_dependency_graph(self):
+    def build_dependency_graph(self) -> nx.Graph:
+        # The graph must be built with ALL points to correctly identify components
+        # that may be connected by a fixed point.
         graph = nx.Graph()
-
-        # Get all variables (the coordinates of free points the solver can play with).
-        variable_nodes = []
-        for p in self.free_points:
-            variable_nodes.extend([f"{p.id}_x", f"{p.id}_y"])
-
+        variable_nodes = [f"{p.id}_{c}" for p in self.points for c in ("x", "y")]
         graph.add_nodes_from(variable_nodes, bipartite=0)
 
         # Add constraint nodes and edges
@@ -80,7 +79,6 @@ class Solver2D(ABC):
                     | PointPointYDistance()
                 ):
                     points_involved.extend([c.p1, c.p2])
-
                 case LinesParallel() | LinesPerpendicular() | LineLineAngle():
                     points_involved.extend(
                         [c.line1.p1, c.line1.p2, c.line2.p1, c.line2.p2]
@@ -94,14 +92,11 @@ class Solver2D(ABC):
                 case _:
                     raise ValueError(f"Unknown constraint type: {type(c)}")
 
-            # Add edges only for free points
+            # Add edges only for all unique points involved in the constraint.
             unique_points_involved = {p.id: p for p in points_involved}.values()
-
-            # Add edges only for free points
             for p in unique_points_involved:
-                if p in self.free_points:
-                    graph.add_edge(constraint_id, f"{p.id}_x")
-                    graph.add_edge(constraint_id, f"{p.id}_y")
+                graph.add_edge(constraint_id, f"{p.id}_x")
+                graph.add_edge(constraint_id, f"{p.id}_y")
 
         return graph
 
@@ -117,24 +112,20 @@ class Solver2D(ABC):
                 for node in component
                 if graph.nodes[node].get("bipartite") == 1
             }
-            sub_constraints = [self.constraints[i] for i in sub_constraint_indices]
+            if not sub_constraint_indices:
+                continue
 
-            # Find all free points that are part of this subproblem.
-            sub_free_point_ids = {
+            sub_constraints = [self.constraints[i] for i in sub_constraint_indices]
+            sub_point_ids = {
                 node.split("_")[0]
                 for node in component
                 if graph.nodes[node].get("bipartite") == 0
             }
+            sub_points = [self.point_map[pid] for pid in sub_point_ids]
 
-            # Only create a subproblem if it has variables to solve for.
-            if not sub_free_point_ids:
-                continue
-
-            sub_free_points = [self.point_map[pid] for pid in sub_free_point_ids]
             constraint_systems.append(
-                {"constraints": sub_constraints, "free_points": sub_free_points}
+                {"constraints": sub_constraints, "points": sub_points}
             )
-
         return constraint_systems
 
     def update_points_from_result(
@@ -170,8 +161,8 @@ class Solver2D(ABC):
         pass
 
     def solve(self):
-        if not self.free_points:
-            print("No free points to solve for. System is fully constrained or empty.")
+        if not self.constraints:
+            print("No constraints to solve.")
             return
 
         # Split the problem into wholly disconnected problems.
@@ -184,7 +175,7 @@ class Solver2D(ABC):
         # If validation passes, proceed with the numerical solve.
         if DEBUG_LOG:
             print(
-                f"Graph analysis found {len(constraint_systems)} valid disconnected systems(s)."
+                f"Graph analysis found {len(constraint_systems)} valid disconnected system(s)."
             )
             print(f"Using {self.__class__.__name__}.")
 
@@ -193,13 +184,27 @@ class Solver2D(ABC):
             if not system["constraints"]:
                 continue
 
-            analyzer = StructuralAnalyzer(system["constraints"], system["free_points"])
-
-            # This breaks one large problem into a sequence of smaller ones.
+            # Pass the complete list of points for the subsystem to the analyser.
+            analyzer = StructuralAnalyzer(system["constraints"], system["points"])
             sequential_blocks = analyzer.find_solving_sequence()
 
-            # Solve the sequential blocks in the determined order.
+            # Now, for each sequential block, we determine its specific free points
+            # before passing that to the numerical solver.
             for block in sequential_blocks:
-                self.solve_constraint_system(block)
-                # Note that this updates the points so we get forward substitution
-                # in the next block.
+                # A block contains all points involved in its solution.
+                all_points_in_block = block["points"]
+
+                # We filter this list against the globally free points to find
+                # which variables can be solved in this block.
+                free_points_in_block = [
+                    p for p in all_points_in_block if p in self.free_points
+                ]
+
+                # Only call the numerical solver if there are actual variables to solve for.
+                # A block might only contain a PointFixed constraint, which has no free points.
+                if free_points_in_block:
+                    solver_block = {
+                        "free_points": free_points_in_block,
+                        "constraints": block["constraints"],
+                    }
+                    self.solve_constraint_system(solver_block)
