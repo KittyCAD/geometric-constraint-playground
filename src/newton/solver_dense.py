@@ -12,15 +12,17 @@ from newton.solver_base import DEBUG_LOG, SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 
 class Solver2DDense(Solver2D):
-    def solve_constraint_system(self, subproblem: Dict[str, Any]):
+    def solve_constraint_system(self, system: Dict[str, Any]):
         # Set the backend to jax for this solve.
         nb.set_backend(nb.Backend.JAX)
 
-        free_points: List[Point] = subproblem["free_points"]
-        constraints: List[BaseConstraint] = subproblem["constraints"]
+        free_points: List[Point] = system["free_points"]
+        constraints: List[BaseConstraint] = system["constraints"]
 
         if DEBUG_LOG:
-            print(f"Solving Subproblem: {[p.id for p in free_points]}")
+            print(
+                f"Solving independently soluble system: {[p.id for p in free_points]}"
+            )
 
         initial_guess = np.array([[p.x, p.y] for p in free_points]).flatten()
 

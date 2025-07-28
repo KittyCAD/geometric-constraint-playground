@@ -38,15 +38,17 @@ class Solver2DSparse(Solver2D):
 
         return jacobian.tocsc()
 
-    def solve_constraint_system(self, subproblem: Dict[str, Any]):
+    def solve_constraint_system(self, system: Dict[str, Any]):
         # Set the backend to numpy for this solve.
         nb.set_backend(nb.Backend.NUMPY)
 
-        free_points: List[Point] = subproblem["free_points"]
-        constraints: List[BaseConstraint] = subproblem["constraints"]
+        free_points: List[Point] = system["free_points"]
+        constraints: List[BaseConstraint] = system["constraints"]
 
         if DEBUG_LOG:
-            print(f"Solving Subproblem: {[p.id for p in free_points]}")
+            print(
+                f"Solving independently soluble system: {[p.id for p in free_points]}"
+            )
 
         initial_guess = np.array([[p.x, p.y] for p in free_points]).flatten()
         var_map = {
@@ -67,7 +69,7 @@ class Solver2DSparse(Solver2D):
 
         def jacobian_wrapper(free_vars: np.ndarray) -> lil_matrix:
             positions = get_all_positions(free_vars)
-            return self.build_sparse_jacobian(subproblem, var_map, positions)
+            return self.build_sparse_jacobian(system, var_map, positions)
 
         # Actual solve magic using the least_squares method.
         # Not sure which is most appropriate here... CC Dave Reeves: current thinking

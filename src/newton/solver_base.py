@@ -151,22 +151,22 @@ class Solver2D(ABC):
         else:
             raise ValueError(f"Solver failed to find a solution: {result.message}")
 
-    def validate_constraint_systems(self, subproblems: List[Dict[str, Any]]) -> None:
+    def validate_constraint_systems(self, systems: List[Dict[str, Any]]) -> None:
         preprocessor = Preprocessor()
 
         if DEBUG_LOG:
-            print("Validating constraints for each subproblem...")
+            print("Validating constraints for each disconnected system...")
 
-        for i, subproblem in enumerate(subproblems):
+        for i, system in enumerate(systems):
             # The preprocessor will raise a ConflictError if any issues are found.
             # If it returns, the subproblem's constraints are considered valid.
-            preprocessor.run(subproblem["constraints"])
+            preprocessor.run(system["constraints"])
             if DEBUG_LOG:
-                print(f"  - Subproblem {i + 1} is valid.")
+                print(f"  - Disconnected system {i + 1} is valid.")
 
     @abstractmethod
-    def solve_constraint_system(self, subproblem: Dict[str, Any]):
-        # Each concrete solver must implement its own subproblem solving logic.
+    def solve_constraint_system(self, system: Dict[str, Any]):
+        # Each concrete solver must implement its own system solving logic.
         pass
 
     def solve(self):
