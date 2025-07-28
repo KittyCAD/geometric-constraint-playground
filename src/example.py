@@ -91,7 +91,7 @@ def constrain_rectangles():
         PointPointEuclideanDistance(p5, p6, distance=4.0),
         PointPointEuclideanDistance(p5, p8, distance=4.0),
         # Add a duplicate constraint to test conflict detection.
-        # PointPointDistance(p5, p6, distance=4.0),  # Duplicate#
+        # PointPointEuclideanDistance(p5, p6, distance=4.0),  # Duplicate
         # Add a conflicting constraint to test conflict detection.
         # LineHorizontal(line=l_right2),  # This should conflict with the vertical line.
     ]
@@ -173,5 +173,5 @@ def constrain_decomposable():
 
 
 if __name__ == "__main__":
-    constrain_rectangles()
-    # constrain_decomposable()
+    # constrain_rectangles()
+    constrain_decomposable()
