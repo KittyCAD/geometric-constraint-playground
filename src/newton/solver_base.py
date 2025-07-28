@@ -84,9 +84,11 @@ class Solver2D(ABC):
 
         return graph
 
-    def analyze_structure(self, graph: nx.Graph) -> List[Dict[str, Any]]:
-        # Processes the dependency graph to find and define independent subproblems.
-        subproblems = []
+    def find_separable_systems(self, graph: nx.Graph) -> List[Dict[str, Any]]:
+        # This finds wholly disconnected problems in the graph.
+        # This is different from independently soluble subproblems, which we need
+        # to tackle later.
+        constraint_systems = []
 
         for component in nx.connected_components(graph):
             sub_constraint_indices = {
@@ -108,11 +110,11 @@ class Solver2D(ABC):
                 continue
 
             sub_free_points = [self.point_map[pid] for pid in sub_free_point_ids]
-            subproblems.append(
+            constraint_systems.append(
                 {"constraints": sub_constraints, "free_points": sub_free_points}
             )
 
-        return subproblems
+        return constraint_systems
 
     def update_points_from_result(
         self, result: OptimizeResult, free_points: List[Point]
@@ -128,7 +130,7 @@ class Solver2D(ABC):
         else:
             raise ValueError(f"Solver failed to find a solution: {result.message}")
 
-    def validate_subproblems(self, subproblems: List[Dict[str, Any]]) -> None:
+    def validate_constraint_systems(self, subproblems: List[Dict[str, Any]]) -> None:
         preprocessor = Preprocessor()
 
         if DEBUG_LOG:
@@ -142,7 +144,7 @@ class Solver2D(ABC):
                 print(f"  - Subproblem {i + 1} is valid.")
 
     @abstractmethod
-    def solve_subproblem(self, subproblem: Dict[str, Any]):
+    def solve_constraint_system(self, subproblem: Dict[str, Any]):
         # Each concrete solver must implement its own subproblem solving logic.
         pass
 
@@ -151,17 +153,19 @@ class Solver2D(ABC):
             print("No free points to solve for. System is fully constrained or empty.")
             return
 
-        # Split the problem into independent subproblems.
+        # Split the problem into wholly disconnected problems.
         graph = self.build_dependency_graph()
-        subproblems = self.analyze_structure(graph)
+        constraint_systems = self.find_separable_systems(graph)
 
-        # Validate the constraints in each subproblem before solving.
-        self.validate_subproblems(subproblems)
+        # Validate the constraints in each disconnected system before solving.
+        self.validate_constraint_systems(constraint_systems)
 
         # If validation passes, proceed with the numerical solve.
         if DEBUG_LOG:
-            print(f"Graph analysis found {len(subproblems)} valid subproblem(s).")
+            print(
+                f"Graph analysis found {len(constraint_systems)} valid disconnected systems(s)."
+            )
             print(f"Using {self.__class__.__name__}.")
 
-        for subproblem in subproblems:
-            self.solve_subproblem(subproblem)
+        for constraint_system in constraint_systems:
+            self.solve_constraint_system(constraint_system)

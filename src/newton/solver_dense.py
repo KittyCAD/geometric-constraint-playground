@@ -12,7 +12,7 @@ from newton.solver_base import DEBUG_LOG, SOLVE_TOLERANCE, Solver2D
 
 
 class Solver2DDense(Solver2D):
-    def solve_subproblem(self, subproblem: Dict[str, Any]):
+    def solve_constraint_system(self, subproblem: Dict[str, Any]):
         # Set the backend to jax for this solve.
         nb.set_backend(nb.Backend.JAX)
 

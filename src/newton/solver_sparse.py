@@ -38,7 +38,7 @@ class Solver2DSparse(Solver2D):
 
         return jacobian.tocsc()
 
-    def solve_subproblem(self, subproblem: Dict[str, Any]):
+    def solve_constraint_system(self, subproblem: Dict[str, Any]):
         # Set the backend to numpy for this solve.
         nb.set_backend(nb.Backend.NUMPY)
 
