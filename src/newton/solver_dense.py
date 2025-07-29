@@ -1,3 +1,11 @@
+"""
+Notes:
+- This method is currently significantly slower than the sparse version; I don't think
+  this is actually because of dense vs. sparse, but because we're repeatedly
+  recompiling the JAX functions because we're feeding it things with different
+  shapes.
+"""
+
 from typing import Any, Dict, List
 
 import jax
