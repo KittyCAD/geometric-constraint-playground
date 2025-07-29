@@ -1,3 +1,5 @@
+import logging
+
 import matplotlib.pyplot as plt
 from pyinstrument import Profiler
 
@@ -12,9 +14,12 @@ from newton.constraints import (
     PointPointXDistance,
     PointPointYDistance,
 )
+from newton.logging_config import configure_logging
 from newton.primitives import Line, Point
 from newton.solver_dense import Solver2DDense
 from newton.solver_sparse import Solver2DSparse
+
+configure_logging(level=logging.INFO)
 
 USE_SPARSE = True
 PLOT = False

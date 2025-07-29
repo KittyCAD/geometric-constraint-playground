@@ -1,3 +1,4 @@
+import logging
 from typing import Any, Dict, List
 
 import numpy as np
@@ -6,8 +7,9 @@ from scipy.sparse import csc_matrix, lil_matrix
 
 import newton.backend as nb
 from newton.constraints import BaseConstraint, Constraint
+from newton.logging_config import logger
 from newton.primitives import Point
-from newton.solver_base import DEBUG_LOG, SOLVER_CONVERGENCE_TOLERANCE, Solver2D
+from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 
 class Solver2DSparse(Solver2D):
@@ -40,12 +42,11 @@ class Solver2DSparse(Solver2D):
                         col_idx = var_map[var_name]
                         jacobian[current_row + residual_idx, col_idx] += value
             except NotImplementedError as e:
-                print(f"Warning: Skipping constraint {type(constraint).__name__}: {e}")
+                logger.warning(f"Skipping constraint {type(constraint).__name__}: {e}")
                 # Skip this constraint's jacobian entries
             current_row += constraint.get_residual_dim()
 
-        if DEBUG_LOG:
-            print("Jacobian:\n", jacobian.toarray())
+        logger.debug("Jacobian:\n%s", jacobian.toarray())
 
         return jacobian.tocsc()
 
@@ -54,14 +55,12 @@ class Solver2DSparse(Solver2D):
         constraints: List[BaseConstraint] = system["constraints"]
 
         if not free_points or not constraints:
-            if DEBUG_LOG:
-                print("Skipping block: No free points or no constraints.")
+            logger.debug("Skipping block: No free points or no constraints.")
             return
 
-        if DEBUG_LOG:
-            print(
-                f"Solving independently soluble system: {[p.id for p in free_points]}"
-            )
+        logger.debug(
+            f"Solving independently soluble system: {[p.id for p in free_points]}"
+        )
 
         initial_guess = np.array([[p.x, p.y] for p in free_points]).flatten()
         var_map = {
@@ -107,7 +106,7 @@ class Solver2DSparse(Solver2D):
             xtol=SOLVER_CONVERGENCE_TOLERANCE,
             ftol=SOLVER_CONVERGENCE_TOLERANCE,
             gtol=SOLVER_CONVERGENCE_TOLERANCE,
-            verbose=2 if DEBUG_LOG else 0,
+            verbose=2 if logger.isEnabledFor(logging.DEBUG) else 0,
         )
         self.update_points_from_result(result, free_points)
 

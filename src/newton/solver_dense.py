@@ -6,6 +6,7 @@ Notes:
   shapes.
 """
 
+import logging
 from typing import Any, Dict, List
 
 import jax
@@ -16,8 +17,9 @@ from scipy.optimize import least_squares
 import newton.backend as nb
 from newton.constants import NONZERO_RANK_TOLERANCE
 from newton.constraints import BaseConstraint, Constraint
+from newton.logging_config import logger
 from newton.primitives import Point
-from newton.solver_base import DEBUG_LOG, SOLVER_CONVERGENCE_TOLERANCE, Solver2D
+from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 
 class Solver2DDense(Solver2D):
@@ -32,10 +34,9 @@ class Solver2DDense(Solver2D):
         free_points: List[Point] = system["free_points"]
         constraints: List[BaseConstraint] = system["constraints"]
 
-        if DEBUG_LOG:
-            print(
-                f"Solving independently soluble system: {[p.id for p in free_points]}"
-            )
+        logger.debug(
+            f"Solving independently soluble system: {[p.id for p in free_points]}"
+        )
 
         initial_guess = np.array([[p.x, p.y] for p in free_points]).flatten()
 
@@ -61,6 +62,7 @@ class Solver2DDense(Solver2D):
         self.check_system_state(jacobian_init, n_variables, n_equations)
 
         # The per-iteration rank check is still useful for diagnostics.
+        # Define a function that can be used for debugging if needed
         def get_jacobian_with_rank(free_vars: jnp.ndarray) -> jnp.ndarray:
             jacobian = jit_jacobian(free_vars)
             s_values = jnp.linalg.svd(jacobian, compute_uv=False)
@@ -84,7 +86,7 @@ class Solver2DDense(Solver2D):
             xtol=SOLVER_CONVERGENCE_TOLERANCE,
             ftol=SOLVER_CONVERGENCE_TOLERANCE,
             gtol=SOLVER_CONVERGENCE_TOLERANCE,
-            verbose=2 if DEBUG_LOG else 0,
+            verbose=2 if logger.isEnabledFor(logging.DEBUG) else 0,
         )
         self.update_points_from_result(result, free_points)
 

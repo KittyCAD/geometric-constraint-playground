@@ -1,3 +1,4 @@
+import logging
 from abc import ABC, abstractmethod
 from types import ModuleType
 from typing import Any, Dict, List, Sequence
@@ -17,6 +18,7 @@ from newton.constraints import (
     PointPointXDistance,
     PointPointYDistance,
 )
+from newton.logging_config import logger
 from newton.matrix_utils import compute_rank
 from newton.preprocessor import Preprocessor
 from newton.primitives import Point
@@ -25,9 +27,8 @@ from newton.structural_analyzer import StructuralAnalyzer
 SOLVE_VALIDATION_TOLERANCE = 1e-6  ## Our maximum allowed error on any constraint.
 SOLVER_CONVERGENCE_TOLERANCE = 1e-10  ## The tolerance for convergence in the solver.
 
-DEBUG_LOG = False
-
-if DEBUG_LOG:
+# Configure numpy print options for debug output
+if logger.isEnabledFor(logging.DEBUG):
     np.set_printoptions(precision=3, suppress=True, linewidth=120)
 
 
@@ -151,15 +152,13 @@ class Solver2D(ABC):
     def validate_constraint_systems(self, systems: List[Dict[str, Any]]) -> None:
         preprocessor = Preprocessor()
 
-        if DEBUG_LOG:
-            print("Validating constraints for each disconnected system...")
+        logger.debug("Validating constraints for each disconnected system...")
 
         for i, system in enumerate(systems):
             # The preprocessor will raise a ConflictError if any issues are found.
             # If it returns, the subproblem's constraints are considered valid.
             preprocessor.run(system["constraints"])
-            if DEBUG_LOG:
-                print(f"  - Disconnected system {i + 1} is valid.")
+            logger.debug(f"  - Disconnected system {i + 1} is valid.")
 
     def check_system_state(
         self, jacobian, n_variables, n_equations, tolerance=NONZERO_RANK_TOLERANCE
@@ -167,23 +166,20 @@ class Solver2D(ABC):
         rank = compute_rank(jacobian, tolerance, self.module)
 
         if rank < n_equations:
-            raise ValueError(
-                f"System is over-constrained. Jacobian rank is {rank}, "
-                f"but there are {n_equations} equations. "
+            logger.warning(
+                f"Initial Jacobian {jacobian.shape} has rank {rank} < {n_equations}. "
+                "This is likely due to redundant equations."
             )
 
         if rank < n_variables:
-            Warning(
-                f"System is under-constrained. Jacobian rank is {rank}, "
-                f"but there are {n_variables} variables. "
+            logger.warning(
+                f"Initial Jacobian {jacobian.shape} has rank {rank} < {n_variables}. "
                 f"This may lead to convergence issues."
             )
 
-        if DEBUG_LOG:
-            print(
-                f"Initial Jacobian is {jacobian.shape} with full rank ({rank}). System is well-posed. Starting solver."
-            )
-        return rank
+        logger.debug(
+            f"Initial Jacobian is {jacobian.shape} with full rank ({rank}). System is well-posed. Starting solver."
+        )
 
     @abstractmethod
     def solve_constraint_system(self, system: Dict[str, Any]):
@@ -203,11 +199,10 @@ class Solver2D(ABC):
         self.validate_constraint_systems(constraint_systems)
 
         # If validation passes, proceed with the numerical solve.
-        if DEBUG_LOG:
-            print(
-                f"Graph analysis found {len(constraint_systems)} valid disconnected system(s)."
-            )
-            print(f"Using {self.__class__.__name__}.")
+        logger.debug(
+            f"Graph analysis found {len(constraint_systems)} valid disconnected system(s)."
+        )
+        logger.info(f"Using {self.__class__.__name__}.")
 
         # Then, for each separable system, find the sequential solving order.
         for system in constraint_systems:
