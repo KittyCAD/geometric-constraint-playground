@@ -100,28 +100,28 @@ class StructuralAnalyzer:
         # Ref: https://discrete.openmathbooks.org/dmoi3/sec_matchings.html
         # Ref: https://networkx.org/documentation/stable/reference/algorithms/generated/networkx.algorithms.bipartite.matching.maximum_matching.html
 
+        # For a system to be structurally 'well-posed', every variable must be uniquely paired with a constraint dimension.
+
+        # A maximum matching finds the largest possible set of edges with no
+        # shared nodes. This is the canonical way to test for structural rank.
         matching = nx.bipartite.maximum_matching(
-            bipartite_graph,
-            top_nodes=self.variable_names,
+            bipartite_graph, top_nodes=self.variable_names
         )
+
+        # The matching from networkx is bidirectional. We only need one direction.
         variable_to_constraint_map = {
             v: c for v, c in matching.items() if v in self.variable_names
         }
 
-        n_unknowns = len(self.variable_names)
-        n_equations = self.n_equations
-        n_matches = len(matching) // 2  # Each match appears twice in the dict.
-
-        if len(variable_to_constraint_map) < n_unknowns:
-            # Not all variables matched: under-constrained.
+        # For a well-posed system, every single variable must be matched.
+        # If even one variable is left out, the system is either over-constrained or
+        # under-constrained from a structural standpoint.
+        # I don't think we can determine which without Jacobian rank?
+        if len(variable_to_constraint_map) < len(self.variable_names):
             raise ConflictError(
-                f"System is under-constrained: {len(variable_to_constraint_map)} of {n_unknowns} variables can be solved by constraints."
-            )
-
-        if n_matches < n_equations:
-            # Not all constraints matched: over-constrained.
-            raise ConflictError(
-                f"System is over-constrained: only {n_matches} of {n_equations} constraints can be satisfied."
+                "System is structurally ill-posed. A perfect matching between "
+                "variables and constraints could not be found. This indicates the "
+                "problem is either over-constrained or under-constrained."
             )
 
         return variable_to_constraint_map
