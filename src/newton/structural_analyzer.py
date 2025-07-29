@@ -62,6 +62,7 @@ class StructuralAnalyzer:
         for i, block in enumerate(ordered_blocks):
             vars_in_block = {f"{p.id}_{c}" for p in block["points"] for c in "xy"}
             num_constraints = sum(c.get_residual_dim() for c in block["constraints"])
+
             print(
                 f" - Block {i + 1}: solves for {sorted(list(vars_in_block))} "
                 f"using {num_constraints} constraints"

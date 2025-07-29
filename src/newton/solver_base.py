@@ -25,7 +25,7 @@ from newton.structural_analyzer import StructuralAnalyzer
 SOLVE_VALIDATION_TOLERANCE = 1e-6  ## Our maximum allowed error on any constraint.
 SOLVER_CONVERGENCE_TOLERANCE = 1e-10  ## The tolerance for convergence in the solver.
 
-DEBUG_LOG = True
+DEBUG_LOG = False
 
 if DEBUG_LOG:
     np.set_printoptions(precision=3, suppress=True, linewidth=120)

@@ -1,4 +1,5 @@
 import matplotlib.pyplot as plt
+from pyinstrument import Profiler
 
 from newton.constraints import (
     LineHorizontal,
@@ -15,7 +16,8 @@ from newton.primitives import Line, Point
 from newton.solver_dense import Solver2DDense
 from newton.solver_sparse import Solver2DSparse
 
-USE_SPARSE = False
+USE_SPARSE = True
+PLOT = False
 
 
 def draw_point(point: Point, color: str, prime: bool = False):
@@ -102,8 +104,9 @@ def constrain_rectangles():
     all_constraints = constraints1 + constraints2
 
     # Plot initial state
-    plt.figure(figsize=(8, 8))
-    plot_geometry(all_points, all_lines, color="red", label="Initial")
+    if PLOT:
+        plt.figure(figsize=(8, 8))
+        plot_geometry(all_points, all_lines, color="red", label="Initial")
 
     # Sooooooolve it.
     Solver2D = Solver2DSparse if USE_SPARSE else Solver2DDense
@@ -111,15 +114,16 @@ def constrain_rectangles():
     solver.solve()
 
     # Plot final state.
-    plot_geometry(all_points, all_lines, color="blue", label="Solved", prime=True)
+    if PLOT:
+        plot_geometry(all_points, all_lines, color="blue", label="Solved", prime=True)
 
-    plt.legend()
-    plt.title("Rectangles From Constraints")
-    plt.xlabel("X")
-    plt.ylabel("Y")
-    plt.axis("equal")
-    plt.grid(True)
-    plt.show()
+        plt.legend()
+        plt.title("Rectangles From Constraints")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.axis("equal")
+        plt.grid(True)
+        plt.show()
 
 
 def constrain_decomposable():
@@ -150,8 +154,9 @@ def constrain_decomposable():
     ]
 
     # Plot initial state.
-    plt.figure(figsize=(8, 8))
-    plot_geometry(points, lines, color="red", label="Initial")
+    if PLOT:
+        plt.figure(figsize=(8, 8))
+        plot_geometry(points, lines, color="red", label="Initial")
 
     # Sooooooolve it.
     Solver2D = Solver2DSparse if USE_SPARSE else Solver2DDense
@@ -159,19 +164,24 @@ def constrain_decomposable():
     solver.solve()
 
     # Plot final state.
-    plot_geometry(points, lines, color="blue", label="Solved", prime=True)
+    if PLOT:
+        plot_geometry(points, lines, color="blue", label="Solved", prime=True)
 
-    plt.legend()
-    plt.title("Decomposable System Solved Sequentially")
-    plt.xlabel("X")
-    plt.ylabel("Y")
-    plt.axis("equal")
-    plt.grid(True)
-    plt.show()
-
-    x = 1
+        plt.legend()
+        plt.title("Decomposable System Solved Sequentially")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.axis("equal")
+        plt.grid(True)
+        plt.show()
 
 
 if __name__ == "__main__":
+    profiler = Profiler()
+    profiler.start()
+
     constrain_rectangles()
     # constrain_decomposable()
+
+    profiler.stop()
+    profiler.print()

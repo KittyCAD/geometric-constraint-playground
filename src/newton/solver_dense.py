@@ -71,7 +71,7 @@ class Solver2DDense(Solver2D):
         result = least_squares(
             fun=jit_residuals,
             x0=initial_guess,
-            jac=jit_jacobian_with_rank,  # type: ignore
+            jac=jit_jacobian,  # type: ignore
             method="trf",
             xtol=SOLVER_CONVERGENCE_TOLERANCE,
             ftol=SOLVER_CONVERGENCE_TOLERANCE,
