@@ -1,4 +1,5 @@
 import logging
+import random
 
 import matplotlib.pyplot as plt
 from pyinstrument import Profiler
@@ -21,8 +22,28 @@ from newton.solver_sparse import Solver2DSparse
 
 configure_logging(level=logging.INFO)
 
-USE_SPARSE = True
-PLOT = False
+USE_SPARSE = False
+PLOT = True
+
+
+def add_random_error(points: list[Point], error_range: float = 1.0, seed: int = 42):
+    """
+    Add random error to point coordinates in the specified range.
+
+    Args:
+        points: List of points to modify
+        error_range: Maximum error magnitude (default: 1.0)
+        seed: Random seed for reproducibility
+
+    Returns:
+        The modified points (same objects, modified in-place)
+    """
+    rng = random.Random(seed)
+    for point in points:
+        # Add random error in the range [-error_range, error_range]
+        point.x += rng.uniform(-error_range, error_range)
+        point.y += rng.uniform(-error_range, error_range)
+    return points
 
 
 def draw_point(point: Point, color: str, prime: bool = False):
@@ -181,12 +202,74 @@ def constrain_decomposable():
         plt.show()
 
 
+def constrain_underdetermined():
+    """
+    We want say three lines, two fully defined, one not quite.
+    """
+    p0 = Point(x=0.0, y=0.0, id="P0")
+    p1 = Point(x=4.0, y=4.0, id="P1")
+    p2 = Point(x=4.0, y=4.0, id="P2")
+    p3 = Point(x=8.0, y=6.0, id="P3")
+    p4 = Point(x=8.0, y=6.0, id="P4")
+    p5 = Point(x=12.0, y=6.0, id="P5")  # This point is not fully constrained.
+
+    # Modify our points a bit and then we'll pull these back with constraints.
+    points_to_modify = [p1, p2, p3, p4, p5]
+    add_random_error(points_to_modify, error_range=1.0, seed=42)
+
+    points = [p0, *points_to_modify]
+
+    line1 = Line(p0, p1, "L1")
+    line2 = Line(p2, p3, "L2")
+    line3 = Line(p4, p5, "L3")  # This line is not fully constrained.
+
+    lines = [line1, line2, line3]
+
+    # Define the constraints in a specific order to show the dependency.
+    constraints = [
+        PointFixed(point=p0),
+        PointPointXDistance(p0, p1, distance=4),
+        PointPointYDistance(p0, p1, distance=4),
+        PointPointEuclideanDistance(p1, p2, distance=0),  # Coincident.
+        PointPointXDistance(p2, p3, distance=4),
+        PointPointYDistance(p2, p3, distance=2),
+        PointPointEuclideanDistance(p3, p4, distance=0),  # Coincident.
+        PointPointXDistance(p4, p5, distance=4),
+        # This would make it fully constrained.
+        # PointPointYDistance(p4, p5, distance=0),
+    ]
+
+    # Plot initial state.
+    if PLOT:
+        plt.figure(figsize=(8, 8))
+        plot_geometry(points, lines, color="red", label="Initial")
+        # plt.show()
+
+    # Sooooooolve it.
+    Solver2D = Solver2DSparse if USE_SPARSE else Solver2DDense
+    solver = Solver2D(points, constraints)
+    solver.solve()
+
+    # Plot final state.
+    if PLOT:
+        plot_geometry(points, lines, color="blue", label="Solved", prime=True)
+
+        plt.legend()
+        plt.title("Underconstrained System")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.axis("equal")
+        plt.grid(True)
+        plt.show()
+
+
 if __name__ == "__main__":
     profiler = Profiler()
     profiler.start()
 
-    constrain_rectangles()
+    # constrain_rectangles()
     # constrain_decomposable()
+    constrain_underdetermined()
 
     profiler.stop()
     profiler.print()

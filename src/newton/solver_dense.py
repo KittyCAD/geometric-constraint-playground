@@ -34,6 +34,10 @@ class Solver2DDense(Solver2D):
         free_points: List[Point] = system["free_points"]
         constraints: List[BaseConstraint] = system["constraints"]
 
+        if not free_points or not constraints:
+            logger.debug("Skipping block: No free points or no constraints.")
+            return
+
         logger.debug(
             f"Solving independently soluble system: {[p.id for p in free_points]}"
         )

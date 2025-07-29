@@ -3,7 +3,7 @@ from typing import Any, Dict, List, Sequence, Set
 import networkx as nx
 
 from newton.constraints import BaseConstraint
-from newton.exceptions import ConflictError
+from newton.logging_config import logger
 from newton.primitives import Point
 
 
@@ -38,12 +38,6 @@ class StructuralAnalyzer:
 
         if not self.constraints:
             return [{"points": self.all_points, "constraints": []}]
-
-        if len(self.variable_names) != self.n_equations:
-            raise ConflictError(
-                f"The system is structurally unsound. There are {len(self.variable_names)} unknowns "
-                f"but {self.n_equations} equations (degrees of freedom required by constraints)."
-            )
 
         # Build what we need to get to our dependency graph.
         bipartite_graph = self.build_bipartite_graph()
@@ -119,11 +113,12 @@ class StructuralAnalyzer:
         # under-constrained from a structural standpoint.
         # I don't think we can determine which without Jacobian rank?
         if len(variable_to_constraint_map) < len(self.variable_names):
-            raise ConflictError(
+            message = (
                 "System is structurally ill-posed. A perfect matching between "
                 "variables and constraints could not be found. This indicates the "
                 "problem is either over-constrained or under-constrained."
             )
+            logger.warning(message)
 
         return variable_to_constraint_map
 
@@ -170,9 +165,14 @@ class StructuralAnalyzer:
             variable_block = scc_list[node_idx]
 
             block_points = self.get_points_from_vars(variable_block)
+
+            # We might not have perfect coverage of constraints in the block.
             constraint_nodes_in_block = {
-                variable_to_constraint_map[var] for var in variable_block
+                variable_to_constraint_map[var]
+                for var in variable_block
+                if var in variable_to_constraint_map
             }
+
             constraint_indices = {
                 int(c_node.split("_")[0][1:]) for c_node in constraint_nodes_in_block
             }
