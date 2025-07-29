@@ -173,5 +173,5 @@ def constrain_decomposable():
 
 
 if __name__ == "__main__":
-    # constrain_rectangles()
-    constrain_decomposable()
+    constrain_rectangles()
+    # constrain_decomposable()

@@ -2,21 +2,28 @@ from typing import Any, Dict, List
 
 import numpy as np
 from scipy.optimize import least_squares
-from scipy.sparse import lil_matrix
+from scipy.sparse import csc_matrix, lil_matrix
 
 import newton.backend as nb
-from newton.constraints import BaseConstraint
+from newton.constraints import BaseConstraint, Constraint
 from newton.primitives import Point
 from newton.solver_base import DEBUG_LOG, SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 
 class Solver2DSparse(Solver2D):
+    def __init__(self, points: List[Point], constraints: List[Constraint]):
+        super().__init__(points, constraints)
+
+        # Handle backend setup.
+        nb.set_backend(nb.Backend.NUMPY)
+        self.module = np
+
     def build_sparse_jacobian(
         self,
         subproblem: Dict[str, Any],
         var_map: Dict[str, int],
         positions: Dict[str, np.ndarray],
-    ) -> lil_matrix:
+    ) -> csc_matrix:
         constraints: List[BaseConstraint] = subproblem["constraints"]
         n_residuals = sum(c.get_residual_dim() for c in constraints)
         n_vars = len(var_map)
@@ -25,12 +32,16 @@ class Solver2DSparse(Solver2D):
         current_row = 0
 
         for constraint in constraints:
-            entries = constraint.get_jacobian_section(positions)
-            for point_id, coord, value, residual_idx in entries:
-                var_name = f"{point_id}_{coord}"
-                if var_name in var_map:
-                    col_idx = var_map[var_name]
-                    jacobian[current_row + residual_idx, col_idx] += value
+            try:
+                entries = constraint.get_jacobian_section(positions)
+                for point_id, coord, value, residual_idx in entries:
+                    var_name = f"{point_id}_{coord}"
+                    if var_name in var_map:
+                        col_idx = var_map[var_name]
+                        jacobian[current_row + residual_idx, col_idx] += value
+            except NotImplementedError as e:
+                print(f"Warning: Skipping constraint {type(constraint).__name__}: {e}")
+                # Skip this constraint's jacobian entries
             current_row += constraint.get_residual_dim()
 
         if DEBUG_LOG:
@@ -39,11 +50,13 @@ class Solver2DSparse(Solver2D):
         return jacobian.tocsc()
 
     def solve_constraint_system(self, system: Dict[str, Any]):
-        # Set the backend to numpy for this solve.
-        nb.set_backend(nb.Backend.NUMPY)
-
         free_points: List[Point] = system["free_points"]
         constraints: List[BaseConstraint] = system["constraints"]
+
+        if not free_points or not constraints:
+            if DEBUG_LOG:
+                print("Skipping block: No free points or no constraints.")
+            return
 
         if DEBUG_LOG:
             print(
@@ -67,9 +80,20 @@ class Solver2DSparse(Solver2D):
             positions = get_all_positions(free_vars)
             return np.concatenate([c.get_residual(positions) for c in constraints])
 
-        def jacobian_wrapper(free_vars: np.ndarray) -> lil_matrix:
+        def jacobian_wrapper(free_vars: np.ndarray) -> csc_matrix:
             positions = get_all_positions(free_vars)
             return self.build_sparse_jacobian(system, var_map, positions)
+
+        # Do rank based system state check.
+        jacobian_init = jacobian_wrapper(initial_guess)
+
+        if jacobian_init.shape is None:
+            raise ValueError("Jacobian is empty or not properly initialized.")
+
+        n_equations = jacobian_init.shape[0]
+        n_variables = jacobian_init.shape[1]
+
+        self.check_system_state(jacobian_init.todense(), n_variables, n_equations)
 
         # Actual solve magic using the least_squares method.
         # Not sure which is most appropriate here... CC Dave Reeves: current thinking
@@ -86,3 +110,5 @@ class Solver2DSparse(Solver2D):
             verbose=2 if DEBUG_LOG else 0,
         )
         self.update_points_from_result(result, free_points)
+
+        return

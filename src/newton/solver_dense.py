@@ -6,16 +6,21 @@ import numpy as np
 from scipy.optimize import least_squares
 
 import newton.backend as nb
-from newton.constraints import BaseConstraint
+from newton.constants import NONZERO_RANK_TOLERANCE
+from newton.constraints import BaseConstraint, Constraint
 from newton.primitives import Point
 from newton.solver_base import DEBUG_LOG, SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 
 class Solver2DDense(Solver2D):
-    def solve_constraint_system(self, system: Dict[str, Any]):
-        # Set the backend to jax for this solve.
-        nb.set_backend(nb.Backend.JAX)
+    def __init__(self, points: List[Point], constraints: List[Constraint]):
+        super().__init__(points, constraints)
 
+        # Handle backend setup.
+        nb.set_backend(nb.Backend.JAX)
+        self.module = jnp
+
+    def solve_constraint_system(self, system: Dict[str, Any]):
         free_points: List[Point] = system["free_points"]
         constraints: List[BaseConstraint] = system["constraints"]
 
@@ -40,10 +45,33 @@ class Solver2DDense(Solver2D):
         jit_residuals = jax.jit(residuals_vector)
         jit_jacobian = jax.jit(jax.jacfwd(residuals_vector))
 
+        # Do rank based system state check.
+        jacobian_init = jit_jacobian(initial_guess)
+        n_equations = jacobian_init.shape[0]
+        n_variables = jacobian_init.shape[1]
+
+        self.check_system_state(jacobian_init, n_variables, n_equations)
+
+        # The per-iteration rank check is still useful for diagnostics.
+        def get_jacobian_with_rank(free_vars: jnp.ndarray) -> jnp.ndarray:
+            jacobian = jit_jacobian(free_vars)
+            s_values = jnp.linalg.svd(jacobian, compute_uv=False)
+            current_rank = jnp.sum(s_values > NONZERO_RANK_TOLERANCE)
+            is_deficient = current_rank < jacobian.shape[1]
+            jax.debug.print("Jacobian Rank: {rank}", rank=current_rank)
+            jax.lax.cond(
+                is_deficient,
+                lambda: jax.debug.print("WARNING: System is locally ill-posed."),
+                lambda: None,
+            )
+            return jacobian
+
+        jit_jacobian_with_rank = jax.jit(get_jacobian_with_rank)
+
         result = least_squares(
             fun=jit_residuals,
             x0=initial_guess,
-            jac=jit_jacobian,  # type: ignore
+            jac=jit_jacobian_with_rank,  # type: ignore
             method="trf",
             xtol=SOLVER_CONVERGENCE_TOLERANCE,
             ftol=SOLVER_CONVERGENCE_TOLERANCE,
@@ -51,3 +79,5 @@ class Solver2DDense(Solver2D):
             verbose=2 if DEBUG_LOG else 0,
         )
         self.update_points_from_result(result, free_points)
+
+        return

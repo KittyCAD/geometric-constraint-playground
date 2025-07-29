@@ -1,10 +1,12 @@
 from abc import ABC, abstractmethod
+from types import ModuleType
 from typing import Any, Dict, List, Sequence
 
 import networkx as nx
 import numpy as np
 from scipy.optimize import OptimizeResult
 
+from newton.constants import NONZERO_RANK_TOLERANCE
 from newton.constraints import (
     BaseConstraint,
     Constraint,
@@ -15,6 +17,7 @@ from newton.constraints import (
     PointPointXDistance,
     PointPointYDistance,
 )
+from newton.matrix_utils import compute_rank
 from newton.preprocessor import Preprocessor
 from newton.primitives import Point
 from newton.structural_analyzer import StructuralAnalyzer
@@ -34,6 +37,9 @@ class Solver2D(ABC):
         self.constraints: Sequence[BaseConstraint] = constraints
         self.free_points = self.identify_free_points()
         self.point_map = {p.id: p for p in self.points}
+        self.module: ModuleType = (
+            np  # Default to numpy, can be overridden by subclasses.
+        )
 
     def identify_free_points(self) -> List[Point]:
         # Find the non-fixed points our solver can play tunes with.
@@ -154,6 +160,30 @@ class Solver2D(ABC):
             preprocessor.run(system["constraints"])
             if DEBUG_LOG:
                 print(f"  - Disconnected system {i + 1} is valid.")
+
+    def check_system_state(
+        self, jacobian, n_variables, n_equations, tolerance=NONZERO_RANK_TOLERANCE
+    ):
+        rank = compute_rank(jacobian, tolerance, self.module)
+
+        if rank < n_equations:
+            raise ValueError(
+                f"System is over-constrained. Jacobian rank is {rank}, "
+                f"but there are {n_equations} equations. "
+            )
+
+        if rank < n_variables:
+            Warning(
+                f"System is under-constrained. Jacobian rank is {rank}, "
+                f"but there are {n_variables} variables. "
+                f"This may lead to convergence issues."
+            )
+
+        if DEBUG_LOG:
+            print(
+                f"Initial Jacobian is {jacobian.shape} with full rank ({rank}). System is well-posed. Starting solver."
+            )
+        return rank
 
     @abstractmethod
     def solve_constraint_system(self, system: Dict[str, Any]):
