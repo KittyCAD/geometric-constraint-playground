@@ -3,13 +3,16 @@ from typing import Any, Dict, List
 
 import numpy as np
 from scipy.optimize import least_squares
-from scipy.sparse import csc_matrix, lil_matrix
+from scipy.sparse import csc_matrix, diags, lil_matrix, vstack
 
 import newton.backend as nb
 from newton.constraints import BaseConstraint, Constraint
 from newton.logging_config import logger
 from newton.primitives import Point
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
+
+# For Tikhonov regularization
+REG_LAMBDA = 1e-9
 
 
 class Solver2DSparse(Solver2D):
@@ -77,11 +80,30 @@ class Solver2DSparse(Solver2D):
 
         def residuals_vector(free_vars: np.ndarray) -> np.ndarray:
             positions = get_all_positions(free_vars)
-            return np.concatenate([c.get_residual(positions) for c in constraints])
+
+            # Original constraint residuals.
+            constraint_residuals = np.concatenate(
+                [c.get_residual(positions) for c in constraints]
+            )
+
+            # Regularization residuals (lambda * x).
+            reg_residuals = REG_LAMBDA * (free_vars - initial_guess)
+
+            # Combine them into the new augmented residual vector.
+            return np.concatenate([constraint_residuals, reg_residuals])
 
         def jacobian_wrapper(free_vars: np.ndarray) -> csc_matrix:
             positions = get_all_positions(free_vars)
-            return self.build_sparse_jacobian(system, var_map, positions)
+
+            # Original constraint Jacobian.
+            jacobian = self.build_sparse_jacobian(system, var_map, positions)
+
+            # Regularization Jacobian (lambda * I)
+            n_vars = len(free_vars)
+            reg_jacobian = diags([REG_LAMBDA] * n_vars, format="csc")
+
+            # Combine them vertically into the new augmented Jacobian
+            return vstack([jacobian, reg_jacobian], format="csc")
 
         # Do rank based system state check.
         jacobian_init = jacobian_wrapper(initial_guess)
