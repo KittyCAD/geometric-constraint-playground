@@ -1,0 +1,195 @@
+import sympy as sp
+
+# Use pretty printing for clear console output.
+sp.init_printing(use_unicode=True)
+
+
+def compute_point_fixed_derivatives():
+    px, py = sp.symbols("px py")
+    fx, fy = sp.symbols("fx fy")
+
+    # Two residuals: R1 = px - fx, R2 = py - fy
+    residual_x = px - fx
+    residual_y = py - fy
+
+    print("Residuals: R1 = px - fx, R2 = py - fy")
+    print(f"∂R1/∂px = {sp.diff(residual_x, px)}")
+    print(f"∂R1/∂py = {sp.diff(residual_x, py)}")
+    print(f"∂R2/∂px = {sp.diff(residual_y, px)}")
+    print(f"∂R2/∂py = {sp.diff(residual_y, py)}")
+
+
+def compute_point_point_euclidean_distance_derivatives():
+    x1, y1, x2, y2, D = sp.symbols("x1 y1 x2 y2 D")
+    residual = sp.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2) - D
+
+    variables = [x1, y1, x2, y2]
+
+    print("Residual: R = sqrt((x1-x2)² + (y1-y2)²) - D")
+
+    for var in variables:
+        deriv = sp.diff(residual, var)
+        print(f"∂R/∂{var} = {deriv}")
+
+
+def compute_point_point_x_distance_derivatives():
+    x1, x2, D = sp.symbols("x1 x2 D")
+    residual = sp.Abs(x1 - x2) - D
+
+    print("Residual: R = |x1 - x2| - D")
+    print(f"∂R/∂x1 = {sp.diff(residual, x1)}")
+    print(f"∂R/∂x2 = {sp.diff(residual, x2)}")
+
+
+def compute_point_point_y_distance_derivatives():
+    y1, y2, D = sp.symbols("y1 y2 D")
+    residual = sp.Abs(y1 - y2) - D
+
+    print("Residual: R = |y1 - y2| - D")
+    print(f"∂R/∂y1 = {sp.diff(residual, y1)}")
+    print(f"∂R/∂y2 = {sp.diff(residual, y2)}")
+
+
+def compute_line_horizontal_derivatives():
+    y1, y2 = sp.symbols("y1 y2")
+    residual = y1 - y2
+
+    print("Residual: R = y1 - y2")
+    print(f"∂R/∂y1 = {sp.diff(residual, y1)}")
+    print(f"∂R/∂y2 = {sp.diff(residual, y2)}")
+
+
+def compute_line_vertical_derivatives():
+    x1, x2 = sp.symbols("x1 x2")
+    residual = x1 - x2
+
+    print("Residual: R = x1 - x2")
+    print(f"∂R/∂x1 = {sp.diff(residual, x1)}")
+    print(f"∂R/∂x2 = {sp.diff(residual, x2)}")
+
+
+def compute_lines_parallel_derivatives():
+    x1, y1, x2, y2 = sp.symbols("x1 y1 x2 y2")  # Line 1
+    x3, y3, x4, y4 = sp.symbols("x3 y3 x4 y4")  # Line 2
+
+    v1_x, v1_y = x2 - x1, y2 - y1
+    v2_x, v2_y = x4 - x3, y4 - y3
+
+    residual = v1_x * v2_y - v1_y * v2_x  # 2D cross-product
+    variables = [x1, y1, x2, y2, x3, y3, x4, y4]
+
+    print("Residual: R = (x2-x1)*(y4-y3) - (y2-y1)*(x4-x3)")
+
+    for var in variables:
+        deriv = sp.diff(residual, var)
+        print(f"∂R/∂{var} = {deriv}")
+
+
+def compute_lines_perpendicular_derivatives():
+    x1, y1, x2, y2 = sp.symbols("x1 y1 x2 y2")  # Line 1
+    x3, y3, x4, y4 = sp.symbols("x3 y3 x4 y4")  # Line 2
+
+    v1_x, v1_y = x2 - x1, y2 - y1
+    v2_x, v2_y = x4 - x3, y4 - y3
+
+    residual = v1_x * v2_x + v1_y * v2_y  # Dot product
+    variables = [x1, y1, x2, y2, x3, y3, x4, y4]
+
+    print("Residual: R = (x2-x1)*(x4-x3) + (y2-y1)*(y4-y3)")
+
+    for var in variables:
+        deriv = sp.diff(residual, var)
+        print(f"∂R/∂{var} = {deriv}")
+
+
+def compute_lines_equal_length_derivatives():
+    x1, y1, x2, y2 = sp.symbols("x1 y1 x2 y2")  # Line 1
+    x3, y3, x4, y4 = sp.symbols("x3 y3 x4 y4")  # Line 2
+
+    len1_squared = (x2 - x1) ** 2 + (y2 - y1) ** 2
+    len2_squared = (x4 - x3) ** 2 + (y4 - y3) ** 2
+    len1 = sp.sqrt(len1_squared)
+    len2 = sp.sqrt(len2_squared)
+    residual = len1 - len2
+
+    variables = [x1, y1, x2, y2, x3, y3, x4, y4]
+
+    print("Residual: R = |L1| - |L2|")
+
+    for var in variables:
+        deriv = sp.diff(residual, var)
+        print(f"∂R/∂{var} = {deriv}")
+
+
+def compute_line_line_angle_derivatives():
+    x1, y1, x2, y2 = sp.symbols("x1 y1 x2 y2")  # Line 1
+    x3, y3, x4, y4 = sp.symbols("x3 y3 x4 y4")  # Line 2
+    alpha = sp.Symbol("alpha")
+
+    v1 = sp.Matrix([x2 - x1, y2 - y1])
+    v2 = sp.Matrix([x4 - x3, y4 - y3])
+
+    # Get the elements as scalars rather than matrix elements
+    v1_x, v1_y = v1[0], v1[1]
+    v2_x, v2_y = v2[0], v2[1]
+
+    # Cross and dot products
+    cross_2d = v1_x * v2_y - v1_y * v2_x
+    dot_prod = v1.dot(v2)
+
+    # Single residual using atan2
+    residual = sp.atan2(cross_2d, dot_prod) - alpha
+
+    variables = [x1, y1, x2, y2, x3, y3, x4, y4]
+
+    print("Residual: R = atan2(v1×v2, v1·v2) - α")
+
+    for var in variables:
+        deriv = sp.diff(residual, var)
+        simplified_deriv = sp.simplify(deriv)
+        print(f"∂R/∂{var} = {simplified_deriv}")
+
+
+def compute_line_line_distance_derivatives():
+    x0, y0, x1, y1 = sp.symbols("x0 y0 x1 y1")  # Line 1 (p0 -> p1)
+    x2, y2 = sp.symbols("x2 y2")  # Point on Line 2 (p2)
+    D = sp.Symbol("D")
+
+    # v is the direction vector of line 1
+    vx = x1 - x0
+    vy = y1 - y0
+
+    # w is the vector from p0 on line 1 to p2 on line 2
+    wx = x2 - x0
+    wy = y2 - y0
+
+    # Perpendicular distance is |v x w| / |v|
+    cross_product = vx * wy - vy * wx
+    cross_product_mag = sp.Abs(cross_product)
+    v_mag_squared = vx**2 + vy**2
+    v_mag = sp.sqrt(v_mag_squared)
+
+    residual = cross_product_mag / v_mag - D
+
+    variables = [x0, y0, x1, y1, x2, y2]
+
+    print("Residual: R = |(p1-p0) × (p2-p0)| / |p1-p0| - D")
+
+    for var in variables:
+        deriv = sp.diff(residual, var)
+        simplified_deriv = sp.simplify(deriv)
+        print(f"∂R/∂{var} = {simplified_deriv}")
+
+
+if __name__ == "__main__":
+    # compute_point_fixed_derivatives()
+    # compute_point_point_euclidean_distance_derivatives()
+    # compute_point_point_x_distance_derivatives()
+    # compute_point_point_y_distance_derivatives()
+    # compute_line_horizontal_derivatives()
+    # compute_line_vertical_derivatives()
+    # compute_lines_parallel_derivatives()
+    # compute_lines_perpendicular_derivatives()
+    # compute_lines_equal_length_derivatives()
+    compute_line_line_angle_derivatives()
+    # compute_line_line_distance_derivatives()
