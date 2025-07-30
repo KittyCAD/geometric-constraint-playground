@@ -487,6 +487,100 @@ class LinesPerpendicular(BaseConstraint):
 
 
 @dataclass
+class LinesEqualLength(BaseConstraint):
+    line1: Line
+    line2: Line
+
+    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
+        p0, p1 = positions[self.line1.p1.id], positions[self.line1.p2.id]
+        p2, p3 = positions[self.line2.p1.id], positions[self.line2.p2.id]
+
+        len1 = nb.np.linalg.norm(p1 - p0)
+        len2 = nb.np.linalg.norm(p3 - p2)
+
+        return nb.np.array([len1 - len2])
+
+    def get_jacobian_section(
+        self, positions: Mapping[str, ArrayLike]
+    ) -> List[Tuple[str, str, float, int]]:
+        # Residual: R = |L1| - |L2|
+        # ∂R/∂x1 = (x1 - x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        # ∂R/∂y1 = (y1 - y2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        # ∂R/∂x2 = (-x1 + x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        # ∂R/∂y2 = (-y1 + y2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        # ∂R/∂x3 = (-x3 + x4)/sqrt((x3 - x4)**2 + (y3 - y4)**2)
+        # ∂R/∂y3 = (-y3 + y4)/sqrt((x3 - x4)**2 + (y3 - y4)**2)
+        # ∂R/∂x4 = (x3 - x4)/sqrt((x3 - x4)**2 + (y3 - y4)**2)
+        # ∂R/∂y4 = (y3 - y4)/sqrt((x3 - x4)**2 + (y3 - y4)**2)
+
+        # Get points.
+        p1 = positions[self.line1.p1.id]
+        p2 = positions[self.line1.p2.id]
+        p3 = positions[self.line2.p1.id]
+        p4 = positions[self.line2.p2.id]
+
+        # Get their components.
+        x1, y1 = p1[0], p1[1]
+        x2, y2 = p2[0], p2[1]
+        x3, y3 = p3[0], p3[1]
+        x4, y4 = p4[0], p4[1]
+
+        # Calculate lengths.
+        length_l1 = nb.np.linalg.norm(p2 - p1)  # sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        length_l2 = nb.np.linalg.norm(p4 - p3)  # sqrt((x3 - x4)**2 + (y3 - y4)**2)
+
+        # Avoid division by zero.
+        if length_l1 < EPS or length_l2 < EPS:
+            return []
+
+        # Calculate derivatives.
+        dr_dx1 = (x1 - x2) / length_l1
+        dr_dy1 = (y1 - y2) / length_l1
+        dr_dx2 = (-x1 + x2) / length_l1
+        dr_dy2 = (-y1 + y2) / length_l1
+        dr_dx3 = (-x3 + x4) / length_l2
+        dr_dy3 = (-y3 + y4) / length_l2
+        dr_dx4 = (x3 - x4) / length_l2
+        dr_dy4 = (y3 - y4) / length_l2
+
+        # Make floats.
+        dr_dx1 = float(dr_dx1)
+        dr_dy1 = float(dr_dy1)
+        dr_dx2 = float(dr_dx2)
+        dr_dy2 = float(dr_dy2)
+        dr_dx3 = float(dr_dx3)
+        dr_dy3 = float(dr_dy3)
+        dr_dx4 = float(dr_dx4)
+        dr_dy4 = float(dr_dy4)
+
+        # This constraint has a scalar residual.
+        i_residual = 0
+
+        return [
+            (self.line1.p1.id, "x", dr_dx1, i_residual),
+            (self.line1.p1.id, "y", dr_dy1, i_residual),
+            (self.line1.p2.id, "x", dr_dx2, i_residual),
+            (self.line1.p2.id, "y", dr_dy2, i_residual),
+            (self.line2.p1.id, "x", dr_dx3, i_residual),
+            (self.line2.p1.id, "y", dr_dy3, i_residual),
+            (self.line2.p2.id, "x", dr_dx4, i_residual),
+            (self.line2.p2.id, "y", dr_dy4, i_residual),
+        ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset(
+            {
+                self.line1.id,
+                self.line1.p1.id,
+                self.line1.p2.id,
+                self.line2.id,
+                self.line2.p1.id,
+                self.line2.p2.id,
+            }
+        )
+
+
+@dataclass
 class LineLineAngle(BaseConstraint):
     line1: Line
     line2: Line
@@ -520,86 +614,77 @@ class LineLineAngle(BaseConstraint):
     def get_jacobian_section(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, str, float, int]]:
-        # HERE BE DRAGONS... I don't think I trust this.
+        # Residual: R = atan2(v1×v2, v1·v2) - α
+        # ∂R/∂x1 = (y1 - y2)/(x1**2 - 2*x1*x2 + x2**2 + y1**2 - 2*y1*y2 + y2**2)
+        # ∂R/∂y1 = (-x1 + x2)/(x1**2 - 2*x1*x2 + x2**2 + y1**2 - 2*y1*y2 + y2**2)
+        # ∂R/∂x2 = (-y1 + y2)/(x1**2 - 2*x1*x2 + x2**2 + y1**2 - 2*y1*y2 + y2**2)
+        # ∂R/∂y2 = (x1 - x2)/(x1**2 - 2*x1*x2 + x2**2 + y1**2 - 2*y1*y2 + y2**2)
+        # ∂R/∂x3 = (-y3 + y4)/(x3**2 - 2*x3*x4 + x4**2 + y3**2 - 2*y3*y4 + y4**2)
+        # ∂R/∂y3 = (x3 - x4)/(x3**2 - 2*x3*x4 + x4**2 + y3**2 - 2*y3*y4 + y4**2)
+        # ∂R/∂x4 = (y3 - y4)/(x3**2 - 2*x3*x4 + x4**2 + y3**2 - 2*y3*y4 + y4**2)
+        # ∂R/∂y4 = (-x3 + x4)/(x3**2 - 2*x3*x4 + x4**2 + y3**2 - 2*y3*y4 + y4**2)
 
-        # Get direction vectors for both lines
-        v1 = positions[self.line1.p2.id] - positions[self.line1.p1.id]
-        v2 = positions[self.line2.p2.id] - positions[self.line2.p1.id]
+        # Get points.
+        p1 = positions[self.line1.p1.id]
+        p2 = positions[self.line1.p2.id]
+        p3 = positions[self.line2.p1.id]
+        p4 = positions[self.line2.p2.id]
+
+        # Get their components.
+        x1, y1 = p1[0], p1[1]
+        x2, y2 = p2[0], p2[1]
+        x3, y3 = p3[0], p3[1]
+        x4, y4 = p4[0], p4[1]
 
         # Calculate magnitudes.
-        mag1 = nb.np.linalg.norm(v1)
-        mag2 = nb.np.linalg.norm(v2)
+        mag1 = nb.np.linalg.norm(p2 - p1)  # sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        mag2 = nb.np.linalg.norm(p4 - p3)  # sqrt((x3 - x4)**2 + (y3 - y4)**2)
 
         # Avoid division by zero.
         if mag1 < EPS or mag2 < EPS:
             return []
 
-        # Calculate dot product and normalized dot product.
-        dot_product = nb.np.dot(v1, v2)
-        cos_angle = nb.np.clip(dot_product / (mag1 * mag2), -1.0, 1.0)
+        # Calculate derivatives.
 
-        # Avoid numerical issues at exact -1 or 1.
-        if abs(abs(cos_angle) - 1.0) < EPS:
-            cos_angle = 0.99 * nb.np.sign(cos_angle)
+        # Note that our denominator terms for the partial derivatives above are
+        # the squared magnitudes of the vectors, i.e.:
+        # x1**2 - 2*x1*x2 + x2**2 + y1**2 - 2*y1*y2 + y2**2 == (x1 - x2)²  + (y1 - y2)²
+        # x3**2 - 2*x3*x4 + x4**2 + y3**2 - 2*y3*y4 + y4**2 == (x3 - x4)²  + (y3 - y4)²
+        mag1_squared = mag1**2
+        mag2_squared = mag2**2
 
-        # Derivative of arccos: d(arccos(x))/dx = -1/sqrt(1-x^2).
-        denom = 1.0 - cos_angle**2
-        if denom < EPS:
-            denom = EPS
-        d_arccos = -1.0 / nb.np.sqrt(denom)
+        dr_dx1 = (y1 - y2) / mag1_squared
+        dr_dy1 = (-x1 + x2) / mag1_squared
+        dr_dx2 = (-y1 + y2) / mag1_squared
+        dr_dy2 = (x1 - x2) / mag1_squared
+        dr_dx3 = (-y3 + y4) / mag2_squared
+        dr_dy3 = (x3 - x4) / mag2_squared
+        dr_dx4 = (y3 - y4) / mag2_squared
+        dr_dy4 = (-x3 + x4) / mag2_squared
 
-        # For each point, calculate partial derivatives.
-        result = []
+        # Make floats.
+        dr_dx1 = float(dr_dx1)
+        dr_dy1 = float(dr_dy1)
+        dr_dx2 = float(dr_dx2)
+        dr_dy2 = float(dr_dy2)
+        dr_dx3 = float(dr_dx3)
+        dr_dy3 = float(dr_dy3)
+        dr_dx4 = float(dr_dx4)
+        dr_dy4 = float(dr_dy4)
 
-        # Derivatives with respect to first line's first point.
-        dx1 = float(
-            d_arccos
-            * ((-v2[0] / (mag1 * mag2)) + (dot_product * v1[0]) / (mag1**3 * mag2))
-        )
-        dy1 = float(
-            d_arccos
-            * ((-v2[1] / (mag1 * mag2)) + (dot_product * v1[1]) / (mag1**3 * mag2))
-        )
-        result.append((self.line1.p1.id, "x", dx1, 0))
-        result.append((self.line1.p1.id, "y", dy1, 0))
+        # This constraint has a scalar residual.
+        i_residual = 0
 
-        # Derivatives with respect to first line's second point.
-        dx2 = float(
-            d_arccos
-            * ((v2[0] / (mag1 * mag2)) - (dot_product * v1[0]) / (mag1**3 * mag2))
-        )
-        dy2 = float(
-            d_arccos
-            * ((v2[1] / (mag1 * mag2)) - (dot_product * v1[1]) / (mag1**3 * mag2))
-        )
-        result.append((self.line1.p2.id, "x", dx2, 0))
-        result.append((self.line1.p2.id, "y", dy2, 0))
-
-        # Derivatives with respect to second line's first point.
-        dx3 = float(
-            d_arccos
-            * ((-v1[0] / (mag1 * mag2)) + (dot_product * v2[0]) / (mag1 * mag2**3))
-        )
-        dy3 = float(
-            d_arccos
-            * ((-v1[1] / (mag1 * mag2)) + (dot_product * v2[1]) / (mag1 * mag2**3))
-        )
-        result.append((self.line2.p1.id, "x", dx3, 0))
-        result.append((self.line2.p1.id, "y", dy3, 0))
-
-        # Derivatives with respect to second line's second point.
-        dx4 = float(
-            d_arccos
-            * ((v1[0] / (mag1 * mag2)) - (dot_product * v2[0]) / (mag1 * mag2**3))
-        )
-        dy4 = float(
-            d_arccos
-            * ((v1[1] / (mag1 * mag2)) - (dot_product * v2[1]) / (mag1 * mag2**3))
-        )
-        result.append((self.line2.p2.id, "x", dx4, 0))
-        result.append((self.line2.p2.id, "y", dy4, 0))
-
-        return result
+        return [
+            (self.line1.p1.id, "x", dr_dx1, i_residual),
+            (self.line1.p1.id, "y", dr_dy1, i_residual),
+            (self.line1.p2.id, "x", dr_dx2, i_residual),
+            (self.line1.p2.id, "y", dr_dy2, i_residual),
+            (self.line2.p1.id, "x", dr_dx3, i_residual),
+            (self.line2.p1.id, "y", dr_dy3, i_residual),
+            (self.line2.p2.id, "x", dr_dx4, i_residual),
+            (self.line2.p2.id, "y", dr_dy4, i_residual),
+        ]
 
     def get_involved_primitive_ids(self) -> frozenset:
         return frozenset(
@@ -611,74 +696,6 @@ class LineLineAngle(BaseConstraint):
                 self.line2.p1.id,
                 self.line2.p2.id,
             ]
-        )
-
-
-@dataclass
-class LinesEqualLength(BaseConstraint):
-    line1: Line
-    line2: Line
-
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        p0, p1 = positions[self.line1.p1.id], positions[self.line1.p2.id]
-        p2, p3 = positions[self.line2.p1.id], positions[self.line2.p2.id]
-
-        len1 = nb.np.linalg.norm(p1 - p0)
-        len2 = nb.np.linalg.norm(p3 - p2)
-
-        return nb.np.array([len1 - len2])
-
-    def get_jacobian_section(
-        self, positions: Mapping[str, ArrayLike]
-    ) -> List[Tuple[str, str, float, int]]:
-        p0, p1 = positions[self.line1.p1.id], positions[self.line1.p2.id]
-        p2, p3 = positions[self.line2.p1.id], positions[self.line2.p2.id]
-
-        d_pos1 = p1 - p0
-        dist1 = np.linalg.norm(d_pos1)
-
-        d_pos2 = p3 - p2
-        dist2 = np.linalg.norm(d_pos2)
-
-        entries = []
-        # Derivatives for line1 (positive contribution)
-        if dist1 > EPS:
-            deriv_x1 = float(d_pos1[0] / dist1)
-            deriv_y1 = float(d_pos1[1] / dist1)
-            entries.extend(
-                [
-                    (self.line1.p2.id, "x", deriv_x1, 0),
-                    (self.line1.p2.id, "y", deriv_y1, 0),
-                    (self.line1.p1.id, "x", -deriv_x1, 0),
-                    (self.line1.p1.id, "y", -deriv_y1, 0),
-                ]
-            )
-
-        # Derivatives for line2 (negative contribution)
-        if dist2 > EPS:
-            deriv_x2 = float(d_pos2[0] / dist2)
-            deriv_y2 = float(d_pos2[1] / dist2)
-            entries.extend(
-                [
-                    (self.line2.p2.id, "x", -deriv_x2, 0),
-                    (self.line2.p2.id, "y", -deriv_y2, 0),
-                    (self.line2.p1.id, "x", deriv_x2, 0),
-                    (self.line2.p1.id, "y", deriv_y2, 0),
-                ]
-            )
-
-        return entries
-
-    def get_involved_primitive_ids(self) -> frozenset:
-        return frozenset(
-            {
-                self.line1.id,
-                self.line1.p1.id,
-                self.line1.p2.id,
-                self.line2.id,
-                self.line2.p1.id,
-                self.line2.p2.id,
-            }
         )
 
 
