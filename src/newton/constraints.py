@@ -417,17 +417,60 @@ class LinesPerpendicular(BaseConstraint):
     def get_jacobian_section(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, str, float, int]]:
-        v1 = positions[self.line1.p2.id] - positions[self.line1.p1.id]
-        v2 = positions[self.line2.p2.id] - positions[self.line2.p1.id]
+        # Residual: R = (x2-x1)*(x4-x3) + (y2-y1)*(y4-y3)
+        # ∂R/∂x1 = x3 - x4
+        # ∂R/∂y1 = y3 - y4
+        # ∂R/∂x2 = -x3 + x4
+        # ∂R/∂y2 = -y3 + y4
+        # ∂R/∂x3 = x1 - x2
+        # ∂R/∂y3 = y1 - y2
+        # ∂R/∂x4 = -x1 + x2
+        # ∂R/∂y4 = -y1 + y2
+
+        # Get points.
+        p1 = positions[self.line1.p1.id]
+        p2 = positions[self.line1.p2.id]
+        p3 = positions[self.line2.p1.id]
+        p4 = positions[self.line2.p2.id]
+
+        # Get their components.
+        x1, y1 = p1[0], p1[1]
+        x2, y2 = p2[0], p2[1]
+        x3, y3 = p3[0], p3[1]
+        x4, y4 = p4[0], p4[1]
+
+        # Calculate derivatives.
+        dr_dx1 = x3 - x4
+        dr_dy1 = y3 - y4
+        dr_dx2 = -x3 + x4
+        dr_dy2 = -y3 + y4
+        dr_dx3 = x1 - x2
+        dr_dy3 = y1 - y2
+        dr_dx4 = -x1 + x2
+        dr_dy4 = -y1 + y2
+
+        # Make floats.
+        dr_dx1 = float(dr_dx1)
+        dr_dy1 = float(dr_dy1)
+        dr_dx2 = float(dr_dx2)
+        dr_dy2 = float(dr_dy2)
+        dr_dx3 = float(dr_dx3)
+        dr_dy3 = float(dr_dy3)
+        dr_dx4 = float(dr_dx4)
+        dr_dy4 = float(dr_dy4)
+
+        # This constraint has a scalar residual.
+        i_residual = 0
+
         return [
-            (self.line1.p1.id, "x", float(-v2[0]), 0),
-            (self.line1.p1.id, "y", float(-v2[1]), 0),
-            (self.line1.p2.id, "x", float(v2[0]), 0),
-            (self.line1.p2.id, "y", float(v2[1]), 0),
-            (self.line2.p1.id, "x", float(-v1[0]), 0),
-            (self.line2.p1.id, "y", float(-v1[1]), 0),
-            (self.line2.p2.id, "x", float(v1[0]), 0),
-            (self.line2.p2.id, "y", float(v1[1]), 0),
+            (self.line1.p1.id, "x", dr_dx1, i_residual),
+            (self.line1.p1.id, "y", dr_dy1, i_residual),
+            (self.line1.p2.id, "x", dr_dx2, i_residual),
+            (self.line1.p2.id, "y", dr_dy2, i_residual),
+            (self.line2.p1.id, "x", dr_dx3, i_residual),
+            (self.line2.p1.id, "y", dr_dy3, i_residual),
+            (self.line2.p2.id, "x", dr_dx4, i_residual),
+            (self.line2.p2.id, "y", dr_dy4, i_residual),
         ]
 
     def get_involved_primitive_ids(self) -> frozenset:

@@ -125,7 +125,8 @@ def compute_lines_perpendicular_derivatives():
     v1_x, v1_y = x2 - x1, y2 - y1
     v2_x, v2_y = x4 - x3, y4 - y3
 
-    residual = v1_x * v2_x + v1_y * v2_y  # Dot product
+    # Lines are perpendicular when dot product is zero.
+    residual = v1_x * v2_x + v1_y * v2_y
     variables = [x1, y1, x2, y2, x3, y3, x4, y4]
 
     print("Residual: R = (x2-x1)*(x4-x3) + (y2-y1)*(y4-y3)")
@@ -223,8 +224,8 @@ if __name__ == "__main__":
     # compute_point_point_y_distance_derivatives()
     # compute_line_horizontal_derivatives()
     # compute_line_vertical_derivatives()
-    compute_lines_parallel_derivatives()
-    # compute_lines_perpendicular_derivatives()
+    # compute_lines_parallel_derivatives()
+    compute_lines_perpendicular_derivatives()
     # compute_lines_equal_length_derivatives()
     # compute_line_line_angle_derivatives()
     # compute_line_line_distance_derivatives()
