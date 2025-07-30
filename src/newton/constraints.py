@@ -21,6 +21,7 @@ class BaseConstraint(ABC):
     def get_jacobian_section(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, str, float, int]]:
+        # This method is used to calculate (part of) a row of the Jacobian matrix.
         pass
 
     def get_residual_dim(self) -> int:
@@ -48,9 +49,25 @@ class PointFixed(BaseConstraint):
     def get_jacobian_section(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, str, float, int]]:
+        # Residuals: R1 = px - fx, R2 = py - fy
+        # ∂R1/∂px = 1
+        # ∂R1/∂py = 0
+        # ∂R2/∂px = 0
+        # ∂R2/∂py = 1
+
+        # Derivatives with respect to the fixed point's coordinates.
+        dr1_dx = 1.0
+        # dr1_dy = 0.0
+        # dr2_dx = 0.0
+        dr2_dy = 1.0
+
+        # Indices for the residuals. This is a 2D constraint, so we have two residuals. Basically all other constraints will have 1 residual.
+        i_x = 0
+        i_y = 1
+
         return [
-            (self.point.id, "x", 1.0, 0),
-            (self.point.id, "y", 1.0, 1),
+            (self.point.id, "x", dr1_dx, i_x),
+            (self.point.id, "y", dr2_dy, i_y),
         ]
 
     def get_involved_primitive_ids(self) -> frozenset:
@@ -72,21 +89,47 @@ class PointPointEuclideanDistance(BaseConstraint):
     def get_jacobian_section(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, str, float, int]]:
-        pos1, pos2 = positions[self.p1.id], positions[self.p2.id]
-        d_pos = pos1 - pos2
-        dist = nb.np.linalg.norm(d_pos)
+        # Residual: R = sqrt((x1-x2)² + (y1-y2)²) - D
+        # ∂R/∂x1 = (x1 - x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        # ∂R/∂y1 = (y1 - y2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        # ∂R/∂x2 = (-x1 + x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        # ∂R/∂y2 = (-y1 + y2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
+
+        # Derivatives with respect to p1 and p2 and the x/y coordinates thereof.
+        p1 = positions[self.p1.id]
+        p2 = positions[self.p2.id]
+
+        # Handle zero-length vectors gracefully.
+        dist = nb.np.linalg.norm(p1 - p2)  # sqrt((x1 - x2)**2 + (y1 - y2)**2)
 
         if dist < EPS:
             return []
 
-        deriv_x = float(d_pos[0] / dist)
-        deriv_y = float(d_pos[1] / dist)
+        # Set out actual derivatives.
+        x1 = p1[0]
+        y1 = p1[1]
+        x2 = p2[0]
+        y2 = p2[1]
+
+        dr_dx1 = (x1 - x2) / dist
+        dr_dy1 = (y1 - y2) / dist
+        dr_dx2 = (-x1 + x2) / dist
+        dr_dy2 = (-y1 + y2) / dist
+
+        # Get as floats.
+        dr_dx1 = float(dr_dx1)
+        dr_dy1 = float(dr_dy1)
+        dr_dx2 = float(dr_dx2)
+        dr_dy2 = float(dr_dy2)
+
+        # This constraint has a scalar residual.
+        i_residual = 0
 
         return [
-            (self.p1.id, "x", deriv_x, 0),
-            (self.p1.id, "y", deriv_y, 0),
-            (self.p2.id, "x", -deriv_x, 0),
-            (self.p2.id, "y", -deriv_y, 0),
+            (self.p1.id, "x", dr_dx1, i_residual),
+            (self.p1.id, "y", dr_dy1, i_residual),
+            (self.p2.id, "x", dr_dx2, i_residual),
+            (self.p2.id, "y", dr_dy2, i_residual),
         ]
 
     def get_involved_primitive_ids(self) -> frozenset:
@@ -106,12 +149,34 @@ class PointPointXDistance(BaseConstraint):
 
     def get_jacobian_section(
         self, positions: Mapping[str, ArrayLike]
-    ) -> List[Tuple[str, str, float, int]]:
-        p1_pos, p2_pos = positions[self.p1.id], positions[self.p2.id]
-        sign = 1.0 if (p1_pos[0] - p2_pos[0]) > 0 else -1.0
+    ) -> List[Tuple[str, str, float, int]]:  #
+        # Residual: R = |x1 - x2| - d
+        # When (x1 - x2) >= 0:
+        # ∂R/∂x1 = 1
+        # ∂R/∂x2 = -1
+        # When (x1 - x2) < 0:
+        # ∂R/∂x1 = -1
+        # ∂R/∂x2 = 1
+
+        # Symbolic derivatives:
+        # ∂R/∂x1 = Piecewise((1, x1 - x2 >= 0), (-1, True))
+        # ∂R/∂x2 = Piecewise((-1, x1 - x2 >= 0), (1, True))
+
+        # Get our derivatives.
+        p1 = positions[self.p1.id]
+        p2 = positions[self.p2.id]
+
+        x1 = p1[0]
+        x2 = p2[0]
+
+        sign = 1.0 if (x1 - x2) > 0 else -1.0
+
+        dr_dx1 = sign
+        dr_dx2 = -sign
+
         return [
-            (self.p1.id, "x", sign, 0),
-            (self.p2.id, "x", -sign, 0),
+            (self.p1.id, "x", dr_dx1, 0),
+            (self.p2.id, "x", dr_dx2, 0),
         ]
 
     def get_involved_primitive_ids(self) -> frozenset:

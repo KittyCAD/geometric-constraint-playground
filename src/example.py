@@ -267,8 +267,8 @@ if __name__ == "__main__":
     profiler = Profiler()
     profiler.start()
 
-    # constrain_rectangles()
-    constrain_decomposable()
+    constrain_rectangles()
+    # constrain_decomposable()
     # constrain_underdetermined()
 
     profiler.stop()

@@ -20,32 +20,48 @@ def compute_point_fixed_derivatives():
 
 
 def compute_point_point_euclidean_distance_derivatives():
-    x1, y1, x2, y2, D = sp.symbols("x1 y1 x2 y2 D")
-    residual = sp.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2) - D
+    x1, y1, x2, y2, d = sp.symbols("x1 y1 x2 y2 d")
+    residual = sp.sqrt((x1 - x2) ** 2 + (y1 - y2) ** 2) - d
 
     variables = [x1, y1, x2, y2]
 
-    print("Residual: R = sqrt((x1-x2)² + (y1-y2)²) - D")
+    print("Residual: R = sqrt((x1-x2)² + (y1-y2)²) - d")
 
     for var in variables:
         deriv = sp.diff(residual, var)
-        print(f"∂R/∂{var} = {deriv}")
+        simplified_deriv = sp.simplify(deriv)
+        print(f"∂R/∂{var} = {simplified_deriv}")
 
 
 def compute_point_point_x_distance_derivatives():
-    x1, x2, D = sp.symbols("x1 x2 D")
-    residual = sp.Abs(x1 - x2) - D
+    x1, x2, d = sp.symbols("x1 x2 d")
 
-    print("Residual: R = |x1 - x2| - D")
+    dist_raw = x1 - x2
+
+    # Define the residual using a piecewise function for clearer derivatives
+    residual = sp.Piecewise(
+        (dist_raw - d, dist_raw >= 0), (-dist_raw - d, dist_raw < 0)
+    )
+
+    print("Residual: R = |x1 - x2| - d")
+    print("When (x1 - x2) >= 0:")
+    print("  ∂R/∂x1 = 1")
+    print("  ∂R/∂x2 = -1")
+    print("When (x1 - x2) < 0:")
+    print("  ∂R/∂x1 = -1")
+    print("  ∂R/∂x2 = 1")
+
+    # Also show the symbolic derivatives for completeness.
+    print("\nSymbolic derivatives:")
     print(f"∂R/∂x1 = {sp.diff(residual, x1)}")
     print(f"∂R/∂x2 = {sp.diff(residual, x2)}")
 
 
 def compute_point_point_y_distance_derivatives():
-    y1, y2, D = sp.symbols("y1 y2 D")
-    residual = sp.Abs(y1 - y2) - D
+    y1, y2, d = sp.symbols("y1 y2 d")
+    residual = sp.Abs(y1 - y2) - d
 
-    print("Residual: R = |y1 - y2| - D")
+    print("Residual: R = |y1 - y2| - d")
     print(f"∂R/∂y1 = {sp.diff(residual, y1)}")
     print(f"∂R/∂y2 = {sp.diff(residual, y2)}")
 
@@ -82,7 +98,8 @@ def compute_lines_parallel_derivatives():
 
     for var in variables:
         deriv = sp.diff(residual, var)
-        print(f"∂R/∂{var} = {deriv}")
+        simplified_deriv = sp.simplify(deriv)
+        print(f"∂R/∂{var} = {simplified_deriv}")
 
 
 def compute_lines_perpendicular_derivatives():
@@ -99,7 +116,8 @@ def compute_lines_perpendicular_derivatives():
 
     for var in variables:
         deriv = sp.diff(residual, var)
-        print(f"∂R/∂{var} = {deriv}")
+        simplified_deriv = sp.simplify(deriv)
+        print(f"∂R/∂{var} = {simplified_deriv}")
 
 
 def compute_lines_equal_length_derivatives():
@@ -118,7 +136,8 @@ def compute_lines_equal_length_derivatives():
 
     for var in variables:
         deriv = sp.diff(residual, var)
-        print(f"∂R/∂{var} = {deriv}")
+        simplified_deriv = sp.simplify(deriv)
+        print(f"∂R/∂{var} = {simplified_deriv}")
 
 
 def compute_line_line_angle_derivatives():
@@ -153,7 +172,7 @@ def compute_line_line_angle_derivatives():
 def compute_line_line_distance_derivatives():
     x0, y0, x1, y1 = sp.symbols("x0 y0 x1 y1")  # Line 1 (p0 -> p1)
     x2, y2 = sp.symbols("x2 y2")  # Point on Line 2 (p2)
-    D = sp.Symbol("D")
+    d = sp.Symbol("d")
 
     # v is the direction vector of line 1
     vx = x1 - x0
@@ -169,11 +188,11 @@ def compute_line_line_distance_derivatives():
     v_mag_squared = vx**2 + vy**2
     v_mag = sp.sqrt(v_mag_squared)
 
-    residual = cross_product_mag / v_mag - D
+    residual = cross_product_mag / v_mag - d
 
     variables = [x0, y0, x1, y1, x2, y2]
 
-    print("Residual: R = |(p1-p0) × (p2-p0)| / |p1-p0| - D")
+    print("Residual: R = |(p1-p0) × (p2-p0)| / |p1-p0| - d")
 
     for var in variables:
         deriv = sp.diff(residual, var)
@@ -184,12 +203,12 @@ def compute_line_line_distance_derivatives():
 if __name__ == "__main__":
     # compute_point_fixed_derivatives()
     # compute_point_point_euclidean_distance_derivatives()
-    # compute_point_point_x_distance_derivatives()
+    compute_point_point_x_distance_derivatives()
     # compute_point_point_y_distance_derivatives()
     # compute_line_horizontal_derivatives()
     # compute_line_vertical_derivatives()
     # compute_lines_parallel_derivatives()
     # compute_lines_perpendicular_derivatives()
     # compute_lines_equal_length_derivatives()
-    compute_line_line_angle_derivatives()
+    # compute_line_line_angle_derivatives()
     # compute_line_line_distance_derivatives()
