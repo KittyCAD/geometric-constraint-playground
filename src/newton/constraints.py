@@ -89,7 +89,7 @@ class PointPointEuclideanDistance(BaseConstraint):
     def get_jacobian_section(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, str, float, int]]:
-        # Residual: R = sqrt((x1-x2)² + (y1-y2)²) - D
+        # Residual: R = sqrt((x1-x2)² + (y1-y2)²) - d
         # ∂R/∂x1 = (x1 - x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
         # ∂R/∂y1 = (y1 - y2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
         # ∂R/∂x2 = (-x1 + x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
@@ -174,9 +174,12 @@ class PointPointXDistance(BaseConstraint):
         dr_dx1 = sign
         dr_dx2 = -sign
 
+        # This constraint has a scalar residual.
+        i_residual = 0
+
         return [
-            (self.p1.id, "x", dr_dx1, 0),
-            (self.p2.id, "x", dr_dx2, 0),
+            (self.p1.id, "x", dr_dx1, i_residual),
+            (self.p2.id, "x", dr_dx2, i_residual),
         ]
 
     def get_involved_primitive_ids(self) -> frozenset:
@@ -197,11 +200,36 @@ class PointPointYDistance(BaseConstraint):
     def get_jacobian_section(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, str, float, int]]:
-        p1_pos, p2_pos = positions[self.p1.id], positions[self.p2.id]
-        sign = 1.0 if (p1_pos[1] - p2_pos[1]) > 0 else -1.0
+        # Residual: R = |y1 - y2| - d
+        # When (y1 - y2) >= 0:
+        # ∂R/∂y1 = 1
+        # ∂R/∂y2 = -1
+        # When (y1 - y2) < 0:
+        # ∂R/∂y1 = -1
+        # ∂R/∂y2 = 1
+
+        # Symbolic derivatives:
+        # ∂R/∂y1 = Piecewise((1, y1 - y2 >= 0), (-1, True))
+        # ∂R/∂y2 = Piecewise((-1, y1 - y2 >= 0), (1, True))
+
+        # Get our derivatives.
+        p1 = positions[self.p1.id]
+        p2 = positions[self.p2.id]
+
+        y1 = p1[1]
+        y2 = p2[1]
+
+        sign = 1.0 if (y1 - y2) > 0 else -1.0
+
+        dr_dy1 = sign
+        dr_dy2 = -sign
+
+        # This constraint has a scalar residual.
+        i_residual = 0
+
         return [
-            (self.p1.id, "y", sign, 0),
-            (self.p2.id, "y", -sign, 0),
+            (self.p1.id, "y", dr_dy1, i_residual),
+            (self.p2.id, "y", dr_dy2, i_residual),
         ]
 
     def get_involved_primitive_ids(self) -> frozenset:
@@ -222,23 +250,76 @@ class LineLength(BaseConstraint):
     def get_jacobian_section(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, str, float, int]]:
-        # This is identical to PointPointDistance jacobian.
-        pos1, pos2 = positions[self.line.p1.id], positions[self.line.p2.id]
-        d_pos = pos1 - pos2
-        dist = np.linalg.norm(d_pos)
-        if dist < EPS:
-            return []
-        deriv_x = float(d_pos[0] / dist)
-        deriv_y = float(d_pos[1] / dist)
-        return [
-            (self.line.p1.id, "x", deriv_x, 0),
-            (self.line.p1.id, "y", deriv_y, 0),
-            (self.line.p2.id, "x", -deriv_x, 0),
-            (self.line.p2.id, "y", -deriv_y, 0),
-        ]
+        # Reuse the implementation from PointPointEuclideanDistance.
+        temp_constraint = PointPointEuclideanDistance(
+            p1=self.line.p1, p2=self.line.p2, distance=self.length
+        )
+        return temp_constraint.get_jacobian_section(positions)
 
     def get_involved_primitive_ids(self) -> frozenset:
         return frozenset({self.line.id, self.line.p1.id, self.line.p2.id})
+
+
+@dataclass
+class LineHorizontal(BaseConstraint):
+    line: Line
+
+    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
+        p1_pos = positions[self.line.p1.id]
+        p2_pos = positions[self.line.p2.id]
+        return nb.np.array([p1_pos[1] - p2_pos[1]])
+
+    def get_jacobian_section(
+        self, positions: Mapping[str, ArrayLike]
+    ) -> List[Tuple[str, str, float, int]]:
+        # Residual: R = y1 - y2
+        # ∂R/∂y1 = 1
+        # ∂R/∂y2 = -1
+
+        dr_dy1 = 1.0
+        dr_dy2 = -1.0
+
+        # This constraint has a scalar residual.
+        i_residual = 0
+
+        return [
+            (self.line.p1.id, "y", dr_dy1, i_residual),
+            (self.line.p2.id, "y", dr_dy2, i_residual),
+        ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset([self.line.id, self.line.p1.id, self.line.p2.id])
+
+
+@dataclass
+class LineVertical(BaseConstraint):
+    line: Line
+
+    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
+        p1_pos = positions[self.line.p1.id]
+        p2_pos = positions[self.line.p2.id]
+        return nb.np.array([p1_pos[0] - p2_pos[0]])
+
+    def get_jacobian_section(
+        self, positions: Mapping[str, ArrayLike]
+    ) -> List[Tuple[str, str, float, int]]:
+        # Residual: R = x1 - x2
+        # ∂R/∂x1 = 1
+        # ∂R/∂x2 = -1
+
+        dr_dx1 = 1.0
+        dr_dx2 = -1.0
+
+        # This constraint has a scalar residual.
+        i_residual = 0
+
+        return [
+            (self.line.p1.id, "x", dr_dx1, i_residual),
+            (self.line.p2.id, "x", dr_dx2, i_residual),
+        ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset([self.line.id, self.line.p1.id, self.line.p2.id])
 
 
 @dataclass
@@ -254,17 +335,60 @@ class LinesParallel(BaseConstraint):
     def get_jacobian_section(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, str, float, int]]:
-        v1 = positions[self.line1.p2.id] - positions[self.line1.p1.id]
-        v2 = positions[self.line2.p2.id] - positions[self.line2.p1.id]
+        # Residual: R = (x2-x1)*(y4-y3) - (y2-y1)*(x4-x3)
+        # ∂R/∂x1 = y3 - y4
+        # ∂R/∂y1 = -x3 + x4
+        # ∂R/∂x2 = -y3 + y4
+        # ∂R/∂y2 = x3 - x4
+        # ∂R/∂x3 = -y1 + y2
+        # ∂R/∂y3 = x1 - x2
+        # ∂R/∂x4 = y1 - y2
+        # ∂R/∂y4 = -x1 + x2
+
+        # Get points.
+        p1 = positions[self.line1.p1.id]
+        p2 = positions[self.line1.p2.id]
+        p3 = positions[self.line2.p1.id]
+        p4 = positions[self.line2.p2.id]
+
+        # Get their components.
+        x1, y1 = p1[0], p1[1]
+        x2, y2 = p2[0], p2[1]
+        x3, y3 = p3[0], p3[1]
+        x4, y4 = p4[0], p4[1]
+
+        # Calculate derivatives.
+        dr_dx1 = y3 - y4
+        dr_dy1 = -x3 + x4
+        dr_dx2 = -y3 + y4
+        dr_dy2 = x3 - x4
+        dr_dx3 = -y1 + y2
+        dr_dy3 = x1 - x2
+        dr_dx4 = y1 - y2
+        dr_dy4 = -x1 + x2
+
+        # Make floats.
+        dr_dx1 = float(dr_dx1)
+        dr_dy1 = float(dr_dy1)
+        dr_dx2 = float(dr_dx2)
+        dr_dy2 = float(dr_dy2)
+        dr_dx3 = float(dr_dx3)
+        dr_dy3 = float(dr_dy3)
+        dr_dx4 = float(dr_dx4)
+        dr_dy4 = float(dr_dy4)
+
+        # This constraint has a scalar residual.
+        i_residual = 0
+
         return [
-            (self.line1.p1.id, "x", float(-v2[1]), 0),
-            (self.line1.p1.id, "y", float(v2[0]), 0),
-            (self.line1.p2.id, "x", float(v2[1]), 0),
-            (self.line1.p2.id, "y", float(-v2[0]), 0),
-            (self.line2.p1.id, "x", float(v1[1]), 0),
-            (self.line2.p1.id, "y", float(-v1[0]), 0),
-            (self.line2.p2.id, "x", float(-v1[1]), 0),
-            (self.line2.p2.id, "y", float(v1[0]), 0),
+            (self.line1.p1.id, "x", dr_dx1, i_residual),
+            (self.line1.p1.id, "y", dr_dy1, i_residual),
+            (self.line1.p2.id, "x", dr_dx2, i_residual),
+            (self.line1.p2.id, "y", dr_dy2, i_residual),
+            (self.line2.p1.id, "x", dr_dx3, i_residual),
+            (self.line2.p1.id, "y", dr_dy3, i_residual),
+            (self.line2.p2.id, "x", dr_dx4, i_residual),
+            (self.line2.p2.id, "y", dr_dy4, i_residual),
         ]
 
     def get_involved_primitive_ids(self) -> frozenset:
@@ -445,48 +569,6 @@ class LineLineAngle(BaseConstraint):
                 self.line2.p2.id,
             ]
         )
-
-
-@dataclass
-class LineHorizontal(BaseConstraint):
-    line: Line
-
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        p1_pos = positions[self.line.p1.id]
-        p2_pos = positions[self.line.p2.id]
-        return nb.np.array([p1_pos[1] - p2_pos[1]])
-
-    def get_jacobian_section(
-        self, positions: Mapping[str, ArrayLike]
-    ) -> List[Tuple[str, str, float, int]]:
-        return [
-            (self.line.p1.id, "y", 1.0, 0),
-            (self.line.p2.id, "y", -1.0, 0),
-        ]
-
-    def get_involved_primitive_ids(self) -> frozenset:
-        return frozenset([self.line.id, self.line.p1.id, self.line.p2.id])
-
-
-@dataclass
-class LineVertical(BaseConstraint):
-    line: Line
-
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        p1_pos = positions[self.line.p1.id]
-        p2_pos = positions[self.line.p2.id]
-        return nb.np.array([p1_pos[0] - p2_pos[0]])
-
-    def get_jacobian_section(
-        self, positions: Mapping[str, ArrayLike]
-    ) -> List[Tuple[str, str, float, int]]:
-        return [
-            (self.line.p1.id, "x", 1.0, 0),
-            (self.line.p2.id, "x", -1.0, 0),
-        ]
-
-    def get_involved_primitive_ids(self) -> frozenset:
-        return frozenset([self.line.id, self.line.p1.id, self.line.p2.id])
 
 
 @dataclass

@@ -59,9 +59,24 @@ def compute_point_point_x_distance_derivatives():
 
 def compute_point_point_y_distance_derivatives():
     y1, y2, d = sp.symbols("y1 y2 d")
-    residual = sp.Abs(y1 - y2) - d
+
+    dist_raw = y1 - y2
+
+    # Define the residual using a piecewise function for clearer derivatives
+    residual = sp.Piecewise(
+        (dist_raw - d, dist_raw >= 0), (-dist_raw - d, dist_raw < 0)
+    )
 
     print("Residual: R = |y1 - y2| - d")
+    print("When (y1 - y2) >= 0:")
+    print("  ∂R/∂y1 = 1")
+    print("  ∂R/∂y2 = -1")
+    print("When (y1 - y2) < 0:")
+    print("  ∂R/∂y1 = -1")
+    print("  ∂R/∂y2 = 1")
+
+    # Also show the symbolic derivatives for completeness.
+    print("\nSymbolic derivatives:")
     print(f"∂R/∂y1 = {sp.diff(residual, y1)}")
     print(f"∂R/∂y2 = {sp.diff(residual, y2)}")
 
@@ -91,7 +106,8 @@ def compute_lines_parallel_derivatives():
     v1_x, v1_y = x2 - x1, y2 - y1
     v2_x, v2_y = x4 - x3, y4 - y3
 
-    residual = v1_x * v2_y - v1_y * v2_x  # 2D cross-product
+    # Lines are parallel when cross product is zero.
+    residual = v1_x * v2_y - v1_y * v2_x
     variables = [x1, y1, x2, y2, x3, y3, x4, y4]
 
     print("Residual: R = (x2-x1)*(y4-y3) - (y2-y1)*(x4-x3)")
@@ -203,11 +219,11 @@ def compute_line_line_distance_derivatives():
 if __name__ == "__main__":
     # compute_point_fixed_derivatives()
     # compute_point_point_euclidean_distance_derivatives()
-    compute_point_point_x_distance_derivatives()
+    # compute_point_point_x_distance_derivatives()
     # compute_point_point_y_distance_derivatives()
     # compute_line_horizontal_derivatives()
     # compute_line_vertical_derivatives()
-    # compute_lines_parallel_derivatives()
+    compute_lines_parallel_derivatives()
     # compute_lines_perpendicular_derivatives()
     # compute_lines_equal_length_derivatives()
     # compute_line_line_angle_derivatives()
