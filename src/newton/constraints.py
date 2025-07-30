@@ -269,24 +269,20 @@ class LineLineAngle(BaseConstraint):
         mag1 = nb.np.linalg.norm(v1)
         mag2 = nb.np.linalg.norm(v2)
 
-        # Create a condition to check for zero-length lines.
-        # This must be done with JAX-aware primitives, and we need`|` for element-wise OR.
+        # Check for zero-length lines.
         is_invalid = (mag1 < EPS) | (mag2 < EPS)
 
-        # To prevent division by zero, create a 'safe' denominator.
-        # We replace the product with 1.0 if it's invalid. The result of this
-        # branch will be discarded by the final `where` anyway.
-        safe_mag_product = nb.np.where(is_invalid, 1.0, mag1 * mag2)
-
-        # Calculate dot product and clip to valid range for arccos.
+        # 2D cross product and dot product.
+        cross_2d = v1[0] * v2[1] - v1[1] * v2[0]
         dot_product = nb.np.dot(v1, v2)
-        cos_angle = nb.np.clip(dot_product / safe_mag_product, -1.0, 1.0)
 
-        # Calculate current angle.
-        current_angle = nb.np.arccos(cos_angle)
+        # Current angle using atan2.
+        current_angle = nb.np.atan2(cross_2d, dot_product)
+
+        # Compute angle difference.
         angle_residual = nb.np.array([current_angle - self.angle])
 
-        # Return 0.0 if the lines are invalid, otherwise return the calculated residual.
+        # Return 0.0 if invalid, otherwise return residual.
         return nb.np.where(is_invalid, nb.np.array([0.0]), angle_residual)
 
     def get_jacobian_section(
