@@ -728,10 +728,62 @@ class LineLineDistance(BaseConstraint):
     def get_jacobian_section(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, str, float, int]]:
-        # TODO...
-        raise NotImplementedError(
-            "LineLineDistance is only supported by the dense (JAX) solver."
-        )
+        # Residual: R = (|v × w| / |v|) - d
+        # ∂R/∂x1 = (-(x1 - x2)*((x1 - x2)*(y1 - yp) - (x1 - xp)*(y1 - y2)) + (y2 - yp)*((x1 - x2)**2 + (y1 - y2)**2))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
+        # ∂R/∂y1 = ((-x2 + xp)*((x1 - x2)**2 + (y1 - y2)**2) - (y1 - y2)*((x1 - x2)*(y1 - yp) - (x1 - xp)*(y1 - y2)))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
+        # ∂R/∂x2 = ((x1 - x2)*((x1 - x2)*(y1 - yp) - (x1 - xp)*(y1 - y2)) + (-y1 + yp)*((x1 - x2)**2 + (y1 - y2)**2))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
+        # ∂R/∂y2 = ((x1 - xp)*((x1 - x2)**2 + (y1 - y2)**2) + (y1 - y2)*((x1 - x2)*(y1 - yp) - (x1 - xp)*(y1 - y2)))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
+        # ∂R/∂xp = (y1 - y2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        # ∂R/∂yp = (-x1 + x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
+
+        # Get points.
+        p1 = positions[self.line1.p1.id]
+        p2 = positions[self.line1.p2.id]
+        pp = positions[self.line2.p1.id]  # This is the point on the second line.
+
+        # Get their components.
+        x1, y1 = p1[0], p1[1]
+        x2, y2 = p2[0], p2[1]
+        xp, yp = pp[0], pp[1]
+
+        # Calculate magnitudes.
+        mag1 = nb.np.linalg.norm(p2 - p1)  # sqrt((x1 - x2)**2 + (y1 - y2)**2)
+
+        # Avoid division by zero.
+        if mag1 < EPS:
+            return []
+
+        # I think we can basically drop in the formulae above.
+        # fmt: off
+        # ruff: noqa
+        dr_dx1 = (-(x1 - x2)*((x1 - x2)*(y1 - yp) - (x1 - xp)*(y1 - y2)) + (y2 - yp)*((x1 - x2)**2 + (y1 - y2)**2))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
+        dr_dy1 = ((-x2 + xp)*((x1 - x2)**2 + (y1 - y2)**2) - (y1 - y2)*((x1 - x2)*(y1 - yp) - (x1 - xp)*(y1 - y2)))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
+        dr_dx2 = ((x1 - x2)*((x1 - x2)*(y1 - yp) - (x1 - xp)*(y1 - y2)) + (-y1 + yp)*((x1 - x2)**2 + (y1 - y2)**2))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
+        dr_dy2 = ((x1 - xp)*((x1 - x2)**2 + (y1 - y2)**2) + (y1 - y2)*((x1 - x2)*(y1 - yp) - (x1 - xp)*(y1 - y2)))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
+        dr_dxp = (y1 - y2)/np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        dr_dyp = (-x1 + x2)/np.sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        # fmt: on
+        # ruff: enable
+
+        # Make floats.
+        dr_dx1 = float(dr_dx1)
+        dr_dy1 = float(dr_dy1)
+        dr_dx2 = float(dr_dx2)
+        dr_dy2 = float(dr_dy2)
+        dr_dxp = float(dr_dxp)
+        dr_dyp = float(dr_dyp)
+
+        # This constraint has a scalar residual.
+        i_residual = 0
+
+        return [
+            (self.line1.p1.id, "x", dr_dx1, i_residual),
+            (self.line1.p1.id, "y", dr_dy1, i_residual),
+            (self.line1.p2.id, "x", dr_dx2, i_residual),
+            (self.line1.p2.id, "y", dr_dy2, i_residual),
+            (self.line2.p1.id, "x", dr_dxp, i_residual),
+            (self.line2.p1.id, "y", dr_dyp, i_residual),
+        ]
 
     def get_involved_primitive_ids(self) -> frozenset:
         return frozenset(

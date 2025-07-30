@@ -187,34 +187,35 @@ def compute_line_line_angle_derivatives():
 
 
 def compute_line_line_distance_derivatives():
-    x0, y0, x1, y1 = sp.symbols("x0 y0 x1 y1")  # Line 1 (p0 -> p1)
-    x2, y2 = sp.symbols("x2 y2")  # Point on Line 2 (p2)
+    x1, y1, x2, y2 = sp.symbols("x1 y1 x2 y2")  # Line 1: p1 to p2
+    xp, yp = sp.symbols("xp yp")  # Point on Line 2
     d = sp.Symbol("d")
 
-    # v is the direction vector of line 1
-    vx = x1 - x0
-    vy = y1 - y0
+    # Use signed distance (no absolute value)
+    v_x, v_y = x2 - x1, y2 - y1
+    w_x, w_y = xp - x1, yp - y1
 
-    # w is the vector from p0 on line 1 to p2 on line 2
-    wx = x2 - x0
-    wy = y2 - y0
+    # Signed cross product
+    cross_2d = v_x * w_y - v_y * w_x
 
-    # Perpendicular distance is |v x w| / |v|
-    cross_product = vx * wy - vy * wx
-    cross_product_mag = sp.Abs(cross_product)
-    v_mag_squared = vx**2 + vy**2
-    v_mag = sp.sqrt(v_mag_squared)
+    # Line magnitude
+    v_mag = sp.sqrt(v_x**2 + v_y**2)
 
-    residual = cross_product_mag / v_mag - d
+    # Signed distance
+    signed_distance = cross_2d / v_mag
 
-    variables = [x0, y0, x1, y1, x2, y2]
+    # Two possible residual formulations:
+    residual_signed = signed_distance - d  # d can be positive or negative
+    # residual_squared = signed_distance**2 - d**2  # Always positive constraint
 
-    print("Residual: R = |(p1-p0) × (p2-p0)| / |p1-p0| - d")
+    variables = [x1, y1, x2, y2, xp, yp]
+
+    print("Residual: R = (|v × w| / |v|) - d")
 
     for var in variables:
-        deriv = sp.diff(residual, var)
-        simplified_deriv = sp.simplify(deriv)
-        print(f"∂R/∂{var} = {simplified_deriv}")
+        deriv = sp.diff(residual_signed, var)
+        simplified = sp.simplify(deriv)
+        print(f"∂R/∂{var} = {simplified}")
 
 
 if __name__ == "__main__":
@@ -227,5 +228,5 @@ if __name__ == "__main__":
     # compute_lines_parallel_derivatives()
     # compute_lines_perpendicular_derivatives()
     # compute_lines_equal_length_derivatives()
-    compute_line_line_angle_derivatives()
-    # compute_line_line_distance_derivatives()
+    # compute_line_line_angle_derivatives()
+    compute_line_line_distance_derivatives()
