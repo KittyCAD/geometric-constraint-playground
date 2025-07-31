@@ -89,7 +89,7 @@ class PointPointEuclideanDistance(BaseConstraint):
     def get_jacobian_section(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, str, float, int]]:
-        # Residual: R = sqrt((x1-x2)² + (y1-y2)²) - d
+        # Residual: R = sqrt((x1-x2)**2 + (y1-y2)**2) - d
         # ∂R/∂x1 = (x1 - x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
         # ∂R/∂y1 = (y1 - y2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
         # ∂R/∂x2 = (-x1 + x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)

@@ -25,7 +25,7 @@ def compute_point_point_euclidean_distance_derivatives():
 
     variables = [x1, y1, x2, y2]
 
-    print("Residual: R = sqrt((x1-x2)² + (y1-y2)²) - d")
+    print("Residual: R = sqrt((x1-x2)**2 + (y1-y2)**2) - d")
 
     for var in variables:
         deriv = sp.diff(residual, var)
