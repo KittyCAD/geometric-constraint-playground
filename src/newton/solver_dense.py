@@ -80,7 +80,8 @@ class Solver2DDense(Solver2D):
             )
             return jacobian
 
-        jit_jacobian_with_rank = jax.jit(get_jacobian_with_rank)
+        # If we want to check rank at each iteration, we can use this:
+        # jit_jacobian_with_rank = jax.jit(get_jacobian_with_rank)
 
         result = least_squares(
             fun=jit_residuals,
