@@ -2,6 +2,7 @@ from typing import Any, Dict, List, Sequence, Set
 
 import networkx as nx
 
+from newton.constants import DECOMPOSE_SYSTEM
 from newton.constraints import BaseConstraint
 from newton.logging_config import logger
 from newton.primitives import Point
@@ -42,6 +43,9 @@ class StructuralAnalyzer:
         ]
 
     def find_solving_sequence(self) -> List[Dict[str, Any]]:
+        if not DECOMPOSE_SYSTEM:
+            return self.find_solving_sequence_full()
+
         # Decomposes the constraint system into a sequence of soluble blocks.
         if not self.variable_names:
             return []

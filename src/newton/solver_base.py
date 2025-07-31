@@ -1,5 +1,6 @@
 import logging
 from abc import ABC, abstractmethod
+from enum import Enum
 from types import ModuleType
 from typing import Any, Dict, List, Sequence
 
@@ -26,6 +27,13 @@ from newton.structural_analyzer import StructuralAnalyzer
 
 SOLVE_VALIDATION_TOLERANCE = 1e-6  ## Our maximum allowed error on any constraint.
 SOLVER_CONVERGENCE_TOLERANCE = 1e-10  ## The tolerance for convergence in the solver.
+
+
+class SystemState(Enum):
+    UNDERDETERMINED = "underdetermined"
+    OVERDETERMINED = "overdetermined"
+    FULLY_DETERMINED = "fully determined"
+
 
 # Configure numpy print options for debug output
 if logger.isEnabledFor(logging.DEBUG):
@@ -165,21 +173,37 @@ class Solver2D(ABC):
     ):
         rank = compute_rank(jacobian, tolerance, self.module)
 
-        if rank < n_equations:
-            logger.warning(
-                f"Initial Jacobian {jacobian.shape} has rank {rank} < {n_equations}. "
-                "This is likely due to redundant equations."
-            )
-
+        # Determine system state based on rank vs variables
         if rank < n_variables:
-            logger.warning(
-                f"Initial Jacobian {jacobian.shape} has rank {rank} < {n_variables}. "
-                f"This may lead to convergence issues."
+            system_state = SystemState.UNDERDETERMINED
+        elif rank > n_variables:
+            system_state = SystemState.OVERDETERMINED
+        else:
+            system_state = SystemState.FULLY_DETERMINED
+
+        # Report redundant constraints if present.
+        if rank < n_equations:
+            logger.info(
+                f"System has {rank} linearly independent equations (from {n_equations} total) for {n_variables} variables. "
+                f"System contains {n_equations - rank} redundant constraint(s)."
+            )
+        else:
+            # All equations are linearly independent.
+            logger.info(
+                f"System has {rank} linearly independent equations for {n_variables} variables."
             )
 
-        logger.debug(
-            f"Initial Jacobian is {jacobian.shape} with full rank ({rank}). System is well-posed. Starting solver."
-        )
+        # Report specific information about the system state.
+        if system_state == SystemState.UNDERDETERMINED:
+            logger.warning(
+                f"System is underdetermined with {n_variables - rank} degree(s) of freedom remaining."
+            )
+        elif system_state == SystemState.OVERDETERMINED:
+            logger.warning(
+                f"System is overdetermined with {rank - n_variables} extra constraint(s). This may cause conflicts."
+            )
+        else:
+            logger.info("System is fully determined and well-posed.")
 
     @abstractmethod
     def solve_constraint_system(self, system: Dict[str, Any]):
@@ -213,7 +237,7 @@ class Solver2D(ABC):
             # ! TODO: This is non-deterministic and can lead to underdetermined systems
             # ! failing to solve.
             analyzer = StructuralAnalyzer(system["constraints"], system["points"])
-            sequential_blocks = analyzer.find_solving_sequence_full()
+            sequential_blocks = analyzer.find_solving_sequence()
 
             # Now, for each sequential block, we determine its specific free points
             # before passing that to the numerical solver.

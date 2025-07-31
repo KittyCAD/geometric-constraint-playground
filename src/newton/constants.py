@@ -1,3 +1,6 @@
+# Attempt system decomposition.
+DECOMPOSE_SYSTEM = False
+
 # Generally used to avoid numerical issues in constraint definitions.
 EPS = 1e-9
 
