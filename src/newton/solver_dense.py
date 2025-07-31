@@ -15,7 +15,7 @@ import numpy as np
 from scipy.optimize import least_squares
 
 import newton.backend as nb
-from newton.constants import NONZERO_RANK_TOLERANCE
+from newton.constants import NONZERO_RANK_TOLERANCE, REGULARIZATION_LAMBDA
 from newton.constraints import BaseConstraint, Constraint
 from newton.logging_config import logger
 from newton.primitives import Point
@@ -43,6 +43,7 @@ class Solver2DDense(Solver2D):
         )
 
         initial_guess = np.array([[p.x, p.y] for p in free_points]).flatten()
+        jnp_initial_guess = jnp.asarray(initial_guess)
 
         def get_all_positions_jax(free_vars: jnp.ndarray) -> Dict[str, jnp.ndarray]:
             positions = {p.id: jnp.array([p.x, p.y]) for p in self.points}
@@ -51,19 +52,45 @@ class Solver2DDense(Solver2D):
             return positions
 
         def residuals_vector(free_vars: jnp.ndarray) -> jnp.ndarray:
+            # Builds an augmented residual vector for the constraints.
+            # The augmentation helps us achieve a minimum-norm solution to
+            # the underdetermined system.
             positions = get_all_positions_jax(free_vars)
-            parts = [c.get_residual(positions) for c in constraints]
-            return jnp.concatenate(parts)
+            constraint_residuals = jnp.concatenate(
+                [c.get_residual(positions) for c in constraints]
+            )
+
+            # Regularization residuals (lambda * (x - x_initial)).
+            reg_residuals = REGULARIZATION_LAMBDA * (free_vars - jnp_initial_guess)
+
+            # Combine into the new augmented residual vector.
+            residuals = jnp.concatenate([constraint_residuals, reg_residuals])
+
+            jax.debug.print(
+                "Residuals shape: {shape}, values: {values}",
+                shape=residuals.shape,
+                values=residuals,
+            )
+
+            return constraint_residuals
 
         jit_residuals = jax.jit(residuals_vector)
         jit_jacobian = jax.jit(jax.jacfwd(residuals_vector))
 
         # Do rank based system state check.
-        jacobian_init = jit_jacobian(initial_guess)
-        n_equations = jacobian_init.shape[0]
-        n_variables = jacobian_init.shape[1]
+        jacobian_init = jit_jacobian(jnp_initial_guess)
 
-        self.check_system_state(jacobian_init, n_variables, n_equations)
+        if jacobian_init.shape is None:
+            raise ValueError("Jacobian is empty or not properly initialized.")
+
+        # Because of our Tikhonov regularization, we need to adjust the number of equations.
+        # We effectively vertically concatenate the actual Jacobian with another matrix of the
+        # size (REG_LAMBDA * I), which adds n_variables more rows.
+        n_variables = jacobian_init.shape[1]
+        # n_equations = jacobian_init.shape[0]
+        n_geom_equations = sum(c.get_residual_dim() for c in constraints)
+
+        self.check_system_state(jacobian_init, n_variables, n_geom_equations)
 
         # The per-iteration rank check is still useful for diagnostics.
         # Define a function that can be used for debugging if needed

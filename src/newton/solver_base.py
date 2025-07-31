@@ -210,6 +210,8 @@ class Solver2D(ABC):
                 continue
 
             # Pass the complete list of points for the subsystem to the analyser.
+            # ! TODO: This is non-deterministic and can lead to underdetermined systems
+            # ! failing to solve.
             analyzer = StructuralAnalyzer(system["constraints"], system["points"])
             sequential_blocks = analyzer.find_solving_sequence()
 

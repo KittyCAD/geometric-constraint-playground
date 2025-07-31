@@ -6,15 +6,11 @@ from scipy.optimize import least_squares
 from scipy.sparse import csc_matrix, diags, lil_matrix, vstack
 
 import newton.backend as nb
+from newton.constants import REGULARIZATION_LAMBDA
 from newton.constraints import BaseConstraint, Constraint
 from newton.logging_config import logger
 from newton.primitives import Point
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
-
-# For Tikhonov regularization
-# TODO: Explore reasonable values for this.
-# TODO: We should do this for dense solve too, if we go down that route.
-REG_LAMBDA = 1e-9
 
 
 class Solver2DSparse(Solver2D):
@@ -81,6 +77,9 @@ class Solver2DSparse(Solver2D):
             return positions
 
         def residuals_vector(free_vars: np.ndarray) -> np.ndarray:
+            # Builds an augmented residual vector for the constraints.
+            # The augmentation helps us achieve a minimum-norm solution to
+            # the underdetermined system.
             positions = get_all_positions(free_vars)
 
             # Original constraint residuals.
@@ -88,8 +87,8 @@ class Solver2DSparse(Solver2D):
                 [c.get_residual(positions) for c in constraints]
             )
 
-            # Regularization residuals (lambda * x).
-            reg_residuals = REG_LAMBDA * (free_vars - initial_guess)
+            # Regularization residuals (lambda * (x - x_initial)).
+            reg_residuals = REGULARIZATION_LAMBDA * (free_vars - initial_guess)
 
             # Combine them into the new augmented residual vector.
             return np.concatenate([constraint_residuals, reg_residuals])
@@ -102,7 +101,7 @@ class Solver2DSparse(Solver2D):
 
             # Regularization Jacobian (lambda * I).
             n_vars = len(free_vars)
-            reg_jacobian = diags([REG_LAMBDA] * n_vars, format="csc")
+            reg_jacobian = diags([REGULARIZATION_LAMBDA] * n_vars, format="csc")
 
             # Combine them vertically into the new augmented Jacobian.
             return vstack([jacobian, reg_jacobian], format="csc")
