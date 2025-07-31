@@ -115,7 +115,7 @@ class Solver2D(ABC):
 
         return graph
 
-    def find_separable_systems(self, graph: nx.Graph) -> List[Dict[str, Any]]:
+    def find_disconnected_systems(self, graph: nx.Graph) -> List[Dict[str, Any]]:
         # This finds wholly disconnected problems in the graph.
         # This is different from independently soluble subproblems, which we need
         # to tackle later.
@@ -217,7 +217,7 @@ class Solver2D(ABC):
 
         # Split the problem into wholly disconnected problems.
         graph = self.build_dependency_graph()
-        constraint_systems = self.find_separable_systems(graph)
+        constraint_systems = self.find_disconnected_systems(graph)
 
         # Validate the constraints in each disconnected system before solving.
         self.validate_constraint_systems(constraint_systems)
