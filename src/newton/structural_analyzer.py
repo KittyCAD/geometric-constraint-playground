@@ -1,9 +1,9 @@
-from typing import Any, Dict, List, Sequence, Set
+from typing import Any, Dict, List, Set
 
 import networkx as nx
 
 from newton.constants import DECOMPOSE_SYSTEM
-from newton.constraints import BaseConstraint
+from newton.constraints import Constraint
 from newton.logging_config import logger
 from newton.primitives import Point
 
@@ -16,7 +16,7 @@ class StructuralAnalyzer:
     Possibly analogous to block triangularizing the system's Jacobian matrix???
     """
 
-    def __init__(self, constraints: Sequence[BaseConstraint], all_points: List[Point]):
+    def __init__(self, constraints: List[Constraint], all_points: List[Point]):
         self.constraints = constraints
         self.all_points = all_points
 
@@ -204,7 +204,7 @@ class StructuralAnalyzer:
 
         return ordered_blocks
 
-    def get_vars_for_constraint(self, constraint: BaseConstraint) -> Set[str]:
+    def get_vars_for_constraint(self, constraint: Constraint) -> Set[str]:
         vars_in_constraint = set()
         primitive_ids = constraint.get_involved_primitive_ids()
 

@@ -23,7 +23,7 @@ from newton.solver_sparse import Solver2DSparse
 configure_logging(level=logging.INFO)
 
 USE_SPARSE = True
-PLOT = False
+PLOT = True
 
 
 def add_random_error(points: list[Point], error_range: float = 1.0, seed: int = 42):

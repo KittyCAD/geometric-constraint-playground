@@ -2,7 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 from enum import Enum
 from types import ModuleType
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List
 
 import networkx as nx
 import numpy as np
@@ -11,7 +11,6 @@ from scipy.optimize import OptimizeResult
 from newton.constants import NONZERO_RANK_TOLERANCE
 from newton.constraint_validator import ConstraintValidator
 from newton.constraints import (
-    BaseConstraint,
     Constraint,
     LineLength,
     LineLineDistance,
@@ -43,7 +42,7 @@ if logger.isEnabledFor(logging.DEBUG):
 class Solver2D(ABC):
     def __init__(self, points: List[Point], constraints: List[Constraint]):
         self.points = points
-        self.constraints: Sequence[BaseConstraint] = constraints
+        self.constraints: List[Constraint] = constraints
         self.free_points = self.identify_free_points()
         self.point_map = {p.id: p for p in self.points}
         self.module: ModuleType = (

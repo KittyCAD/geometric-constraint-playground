@@ -16,7 +16,7 @@ from scipy.optimize import least_squares
 
 import newton.backend as nb
 from newton.constants import NONZERO_RANK_TOLERANCE, REGULARIZATION_LAMBDA
-from newton.constraints import BaseConstraint, Constraint
+from newton.constraints import Constraint
 from newton.logging_config import logger
 from newton.primitives import Point
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
@@ -32,7 +32,7 @@ class Solver2DDense(Solver2D):
 
     def solve_constraint_system(self, system: Dict[str, Any]):
         free_points: List[Point] = system["free_points"]
-        constraints: List[BaseConstraint] = system["constraints"]
+        constraints: List[Constraint] = system["constraints"]
 
         if not free_points or not constraints:
             logger.debug("Skipping block: No free points or no constraints.")

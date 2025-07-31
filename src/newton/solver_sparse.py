@@ -7,7 +7,7 @@ from scipy.sparse import csc_matrix, diags, lil_matrix, vstack
 
 import newton.backend as nb
 from newton.constants import REGULARIZATION_LAMBDA
-from newton.constraints import BaseConstraint, Constraint
+from newton.constraints import Constraint
 from newton.logging_config import logger
 from newton.primitives import Point
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
@@ -27,7 +27,7 @@ class Solver2DSparse(Solver2D):
         var_map: Dict[str, int],
         positions: Dict[str, np.ndarray],
     ) -> csc_matrix:
-        constraints: List[BaseConstraint] = subproblem["constraints"]
+        constraints: List[Constraint] = subproblem["constraints"]
         n_residuals = sum(c.get_residual_dim() for c in constraints)
         n_vars = len(var_map)
 
@@ -53,7 +53,7 @@ class Solver2DSparse(Solver2D):
 
     def solve_constraint_system(self, system: Dict[str, Any]):
         free_points: List[Point] = system["free_points"]
-        constraints: List[BaseConstraint] = system["constraints"]
+        constraints: List[Constraint] = system["constraints"]
 
         if not free_points or not constraints:
             logger.debug("Skipping block: No free points or no constraints.")
@@ -104,7 +104,9 @@ class Solver2DSparse(Solver2D):
             reg_jacobian = diags([REGULARIZATION_LAMBDA] * n_vars, format="csc")
 
             # Combine them vertically into the new augmented Jacobian.
-            return vstack([jacobian, reg_jacobian], format="csc")
+            result = vstack([jacobian, reg_jacobian], format="csc")
+
+            return csc_matrix(result)
 
         # Do rank based system state check.
         jacobian_init = jacobian_wrapper(initial_guess)

@@ -1,18 +1,14 @@
 import itertools
-from typing import List, Sequence, Tuple, Type
+from typing import List, Tuple, Type
 
 import networkx as nx
 
-from newton.constraints import (
-    BaseConstraint,
-    LineHorizontal,
-    LineVertical,
-)
+from newton.constraints import Constraint, LineHorizontal, LineVertical
 from newton.exceptions import ConflictError
 
 
 class ConstraintValidator:
-    def run(self, constraints: Sequence[BaseConstraint]) -> List[BaseConstraint]:
+    def run(self, constraints: List[Constraint]) -> List[Constraint]:
         if not constraints:
             return []
 
@@ -27,8 +23,8 @@ class ConstraintValidator:
         return list(constraints)
 
     def build_constraint_groups(
-        self, constraints: Sequence[BaseConstraint]
-    ) -> List[List[BaseConstraint]]:
+        self, constraints: List[Constraint]
+    ) -> List[List[Constraint]]:
         # Groups constraints by building a graph where nodes are constraints
         # and an edge exists if they share any primitive. The connected components of
         # this graph are the groups.
@@ -55,7 +51,7 @@ class ConstraintValidator:
 
         return groups
 
-    def process_group(self, group: List[BaseConstraint]) -> None:
+    def process_group(self, group: List[Constraint]) -> None:
         # Analyse a group of related constraints for conflicts and redundancies.
         # This method validates the group and raises a ConflictError if any issues are found.
 
@@ -80,7 +76,7 @@ class ConstraintValidator:
 
         # Rule: No duplicate constraints on the exact same primitives.
         # This treats any direct redundancy as an error.
-        seen_instances: set[Tuple[Type[BaseConstraint], frozenset]] = set()
+        seen_instances: set[Tuple[Type[Constraint], frozenset]] = set()
         for c in group:
             instance_key = (type(c), c.get_involved_primitive_ids())
             if instance_key in seen_instances:
