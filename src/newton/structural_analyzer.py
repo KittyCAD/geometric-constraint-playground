@@ -66,12 +66,12 @@ class StructuralAnalyzer:
             dep_graph, scc_list, variable_to_constraint_map
         )
 
-        print("Found solving sequence using graph decomposition:")
+        logger.info("Found solving sequence using graph decomposition:")
         for i, block in enumerate(ordered_blocks):
             vars_in_block = {f"{p.id}_{c}" for p in block["points"] for c in "xy"}
             num_constraints = sum(c.get_residual_dim() for c in block["constraints"])
 
-            print(
+            logger.info(
                 f" - Block {i + 1}: solves for {sorted(list(vars_in_block))} "
                 f"using {num_constraints} constraints"
             )

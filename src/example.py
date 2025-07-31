@@ -2,7 +2,6 @@ import logging
 import random
 
 import matplotlib.pyplot as plt
-from pyinstrument import Profiler
 
 from newton.constraints import (
     LineHorizontal,
@@ -15,15 +14,15 @@ from newton.constraints import (
     PointPointXDistance,
     PointPointYDistance,
 )
-from newton.logging_config import configure_logging
+from newton.logging_config import configure_logging, logger
 from newton.primitives import Line, Point
 from newton.solver_dense import Solver2DDense
 from newton.solver_sparse import Solver2DSparse
 
-configure_logging(level=logging.INFO)
+configure_logging(level=logging.WARNING)
 
 USE_SPARSE = True
-PLOT = True
+PLOT = False
 
 
 def add_random_error(points: list[Point], error_range: float = 1.0, seed: int = 42):
@@ -263,13 +262,29 @@ def constrain_underdetermined():
         plt.show()
 
 
+def test_determinism():
+    n_passed = 0
+    n_failed = 0
+    for i in range(100):
+        try:
+            constrain_underdetermined()
+            n_passed += 1
+        except Exception as e:
+            logger.error(f"Test {i} failed: {e}")
+            n_failed += 1
+
+    print(f"Determinism test completed: {n_passed} passed, {n_failed} failed.")
+
+
 if __name__ == "__main__":
-    profiler = Profiler()
-    profiler.start()
+    # profiler = Profiler()
+    # profiler.start()
 
     # constrain_rectangles()
     # constrain_decomposable()
-    constrain_underdetermined()
+    # constrain_underdetermined()
 
-    profiler.stop()
-    profiler.print()
+    # profiler.stop()
+    # profiler.print()
+
+    test_determinism()
