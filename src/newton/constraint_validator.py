@@ -11,7 +11,7 @@ from newton.constraints import (
 from newton.exceptions import ConflictError
 
 
-class Preprocessor:
+class ConstraintValidator:
     def run(self, constraints: Sequence[BaseConstraint]) -> List[BaseConstraint]:
         if not constraints:
             return []

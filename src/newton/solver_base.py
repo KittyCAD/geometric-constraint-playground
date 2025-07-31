@@ -8,6 +8,7 @@ import numpy as np
 from scipy.optimize import OptimizeResult
 
 from newton.constants import NONZERO_RANK_TOLERANCE
+from newton.constraint_validator import ConstraintValidator
 from newton.constraints import (
     BaseConstraint,
     Constraint,
@@ -20,7 +21,6 @@ from newton.constraints import (
 )
 from newton.logging_config import logger
 from newton.matrix_utils import compute_rank
-from newton.preprocessor import Preprocessor
 from newton.primitives import Point
 from newton.structural_analyzer import StructuralAnalyzer
 
@@ -150,14 +150,14 @@ class Solver2D(ABC):
             raise ValueError(f"Solver failed to find a solution: {result.message}")
 
     def validate_constraint_systems(self, systems: List[Dict[str, Any]]) -> None:
-        preprocessor = Preprocessor()
+        validator = ConstraintValidator()
 
         logger.debug("Validating constraints for each disconnected system...")
 
         for i, system in enumerate(systems):
-            # The preprocessor will raise a ConflictError if any issues are found.
+            # The validator will raise a ConflictError if any issues are found.
             # If it returns, the subproblem's constraints are considered valid.
-            preprocessor.run(system["constraints"])
+            validator.run(system["constraints"])
             logger.debug(f"  - Disconnected system {i + 1} is valid.")
 
     def check_system_state(

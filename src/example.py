@@ -269,7 +269,7 @@ if __name__ == "__main__":
 
     # constrain_rectangles()
     # constrain_decomposable()
-    constrain_underdetermined()
+    # constrain_underdetermined()
 
     profiler.stop()
     profiler.print()
