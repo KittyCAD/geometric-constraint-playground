@@ -31,6 +31,16 @@ class StructuralAnalyzer:
         # Generally our constraints have a scalar residual, but not all.
         self.n_equations = sum(c.get_residual_dim() for c in constraints)
 
+    def find_solving_sequence_full(self) -> List[Dict[str, Any]]:
+        # Don't decompose the system into blocks, just return the full system.
+        # Used for testing.
+        return [
+            {
+                "points": self.all_points,
+                "constraints": list(self.constraints),
+            }
+        ]
+
     def find_solving_sequence(self) -> List[Dict[str, Any]]:
         # Decomposes the constraint system into a sequence of soluble blocks.
         if not self.variable_names:

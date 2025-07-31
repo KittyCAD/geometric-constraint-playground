@@ -213,7 +213,7 @@ class Solver2D(ABC):
             # ! TODO: This is non-deterministic and can lead to underdetermined systems
             # ! failing to solve.
             analyzer = StructuralAnalyzer(system["constraints"], system["points"])
-            sequential_blocks = analyzer.find_solving_sequence()
+            sequential_blocks = analyzer.find_solving_sequence_full()
 
             # Now, for each sequential block, we determine its specific free points
             # before passing that to the numerical solver.
