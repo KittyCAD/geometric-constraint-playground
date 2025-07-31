@@ -12,6 +12,8 @@ from newton.primitives import Point
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 # For Tikhonov regularization
+# TODO: Explore reasonable values for this.
+# TODO: We should do this for dense solve too, if we go down that route.
 REG_LAMBDA = 1e-9
 
 
@@ -98,11 +100,11 @@ class Solver2DSparse(Solver2D):
             # Original constraint Jacobian.
             jacobian = self.build_sparse_jacobian(system, var_map, positions)
 
-            # Regularization Jacobian (lambda * I)
+            # Regularization Jacobian (lambda * I).
             n_vars = len(free_vars)
             reg_jacobian = diags([REG_LAMBDA] * n_vars, format="csc")
 
-            # Combine them vertically into the new augmented Jacobian
+            # Combine them vertically into the new augmented Jacobian.
             return vstack([jacobian, reg_jacobian], format="csc")
 
         # Do rank based system state check.
@@ -111,10 +113,14 @@ class Solver2DSparse(Solver2D):
         if jacobian_init.shape is None:
             raise ValueError("Jacobian is empty or not properly initialized.")
 
-        n_equations = jacobian_init.shape[0]
+        # Because of our Tikhonov regularization, we need to adjust the number of equations.
+        # We effectively vertically concatenate the actual Jacobian with another matrix of the
+        # size (REG_LAMBDA * I), which adds n_variables more rows.
         n_variables = jacobian_init.shape[1]
+        # n_equations = jacobian_init.shape[0]
+        n_geom_equations = sum(c.get_residual_dim() for c in constraints)
 
-        self.check_system_state(jacobian_init.todense(), n_variables, n_equations)
+        self.check_system_state(jacobian_init.todense(), n_variables, n_geom_equations)
 
         # Actual solve magic using the least_squares method.
         # Not sure which is most appropriate here... CC Dave Reeves: current thinking
