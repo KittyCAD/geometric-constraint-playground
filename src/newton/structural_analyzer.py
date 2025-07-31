@@ -1,3 +1,56 @@
+# This module provides tools to split a geometric constraint system into
+# several sequentially soluble blocks, ideally to split a large system
+# of equations into smaller, more easily soluble parts.
+#
+# For example, here we could solve for x1 and y1 first, then use these later - we want
+# to identify that.
+#
+# Variables: x1, y1, x2, y2
+# Constraints:
+# - C1: x1 = 5               (fixes x1)
+# - C2: y1 = 3               (fixes y1)
+# - C3: distance(P1,P2) = 10 (relates all four variables)
+#
+# The current approach is as follows:
+#
+# 1: From `find_solving_sequence`, it builds a bipartite graph that connects every
+# variable to every constraint that references it.
+#
+# 2: We get the 'maximum matching' on the bipartite graph to try find one constraint for each
+# variable; basically trying to find the largest possible set of variable-constraint
+# pairs where each variable is paired with exactly one constraint and each constraint
+# is paired with at most one variable.
+#
+# 3: We then build a directed dependency graph from the matching. Each matched
+# variable-constraint pair becomes an edge, creating a graph where variables depend
+# on the constraints that determine them.
+#
+# 4: From the directed dependency graph, we look for strongly connected components, where each
+# connected component represents a block of variables that must be solved together
+# simultaneously. The blocks are ordered by the dependencies between them, and the
+# system is solved sequentially.
+#
+# IT DOES NOT WORK
+#
+# The fundamental problem (I think) is that when the bipartite graph is not perfectly matchable
+# (which happens when the system is over or under-constrained), there are multiple possible
+# maximum matchings. NetworkX returns whichever matching it encounters first during its
+# traversal, and this depends on Python's hash seed. The selected matching therefore changes
+# from run to run, which can reorder the dependency graph and potentially push constraints
+# that should be solved first into later blocks. This makes the entire decomposition
+# non-deterministic.
+#
+# Additionally, the maximum matching approach assumes that each variable should be
+# determined by exactly one constraint, but geometric constraint systems don't naturally
+# have this structure. Variables often participate in multiple constraints, and although
+# we still considered all of these during the actual solve, the ordering does not.
+#
+# Dulmage–Mendelsohn decomposition looks like it might solve these issues, but it looks
+# a bit steep for me and it's unclear how big the performance impact would be.
+#
+# https://www.osti.gov/servlets/purl/1996187
+#
+
 from typing import Any, Dict, List, Set
 
 import networkx as nx

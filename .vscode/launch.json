@@ -10,7 +10,7 @@
             "args": [],
             "env": {
                 "PYTHONPATH": "src",
-                "PYTHONHASHSEED": "2"
+                // "PYTHONHASHSEED": "0"
             }
         },
     ]
