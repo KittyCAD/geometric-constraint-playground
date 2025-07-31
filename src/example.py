@@ -2,6 +2,7 @@ import logging
 import random
 
 import matplotlib.pyplot as plt
+from pyinstrument import Profiler
 
 from newton.constraints import (
     LineHorizontal,
@@ -19,7 +20,7 @@ from newton.primitives import Line, Point
 from newton.solver_dense import Solver2DDense
 from newton.solver_sparse import Solver2DSparse
 
-configure_logging(level=logging.WARNING)
+configure_logging(level=logging.INFO)
 
 USE_SPARSE = True
 PLOT = False
@@ -277,14 +278,14 @@ def test_determinism():
 
 
 if __name__ == "__main__":
-    # profiler = Profiler()
-    # profiler.start()
+    profiler = Profiler()
+    profiler.start()
 
     # constrain_rectangles()
     # constrain_decomposable()
-    # constrain_underdetermined()
+    constrain_underdetermined()
 
-    # profiler.stop()
-    # profiler.print()
+    profiler.stop()
+    profiler.print()
 
-    test_determinism()
+    # test_determinism()
