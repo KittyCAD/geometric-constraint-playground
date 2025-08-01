@@ -9,7 +9,8 @@
             "console": "integratedTerminal",
             "args": [],
             "env": {
-                "PYTHONPATH": "src"
+                "PYTHONPATH": "src",
+                // "PYTHONHASHSEED": "0"
             }
         },
     ]
