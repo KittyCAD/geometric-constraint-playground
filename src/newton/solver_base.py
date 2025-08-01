@@ -14,11 +14,10 @@ from newton.constraints import (
     Constraint,
     PointFixed,
 )
-from newton.exceptions import UnsupportedPrimitiveError
 from newton.logging_config import logger
 from newton.matrix_utils import compute_rank
 from newton.primitives import Point, Primitive
-from newton.symbolic_substitution import perform_symbolic_substitution
+from newton.symbolic_substitution import find, perform_symbolic_substitution
 
 SOLVE_VALIDATION_TOLERANCE = 1e-6  ## Our maximum allowed error on any constraint.
 SOLVER_CONVERGENCE_TOLERANCE = 1e-10  ## The tolerance for convergence in the solver.
@@ -196,14 +195,11 @@ class Solver2D(ABC):
             if not system["constraints"]:
                 continue
 
-            # Dumb 1:1 mapping; only to keep the interface consistent.
-            primitive_map = {p.id: p.id for p in self.primitives}
-
             if self.free_primitives:
                 solver_block = {
                     "free_primitives": self.free_primitives,
                     "constraints": self.constraints,
-                    "substituted_primitive_map": primitive_map,
+                    "substitution_map": {},
                 }
                 self.solve_constraint_system(solver_block)
 
@@ -231,8 +227,8 @@ class Solver2D(ABC):
                 continue
 
             # Get both simplified constraints and the primitive mapping.
-            simplified_constraints, simplified_primitive_map = (
-                perform_symbolic_substitution(system["constraints"], system["points"])
+            simplified_constraints, substitution_map = perform_symbolic_substitution(
+                system["constraints"], system["primitives"]
             )
 
             # Get the simplified primitive list.
@@ -242,14 +238,14 @@ class Solver2D(ABC):
 
             # Use simplified primitives for the free primitive calculation
             free_primitives = self.get_free_primitives_from_simplified(
-                simplified_primitives
+                simplified_primitives, substitution_map
             )
 
             if free_primitives:
                 solver_block = {
                     "free_primitives": free_primitives,
                     "constraints": simplified_constraints,
-                    "substituted_primitive_map": simplified_primitive_map,
+                    "substitution_map": substitution_map,
                 }
                 self.solve_constraint_system(solver_block)
 
@@ -267,56 +263,94 @@ class Solver2D(ABC):
         ]
 
     def get_free_primitives_from_simplified(
-        self, simplified_primitives: List[Primitive]
+        self, simplified_primitives: List[Primitive], substitution_map: Dict[str, str]
     ) -> List[Primitive]:
         fixed_primitive_ids = set()
-        for c in self.constraints:  # Check against all original constraints.
+        for c in self.constraints:
             if isinstance(c, PointFixed):
                 fixed_primitive_ids.add(c.point.id)
 
-        return [p for p in simplified_primitives if p.id not in fixed_primitive_ids]
+        truly_free_primitives = []
+        for p in simplified_primitives:
+            if p.id in fixed_primitive_ids:
+                continue
 
-    def compute_final_positions(
+            # Check if any of the primitive's variables are "roots"
+            # (i.e., they are not a key in the substitution map).
+            is_truly_free = False
+            for var_id in p.get_variable_ids():
+                if var_id not in substitution_map:
+                    is_truly_free = True
+                    break  # Found a free variable, so the primitive is free.
+
+            if is_truly_free:
+                truly_free_primitives.append(p)
+
+        return truly_free_primitives
+
+    def compute_final_variable_values(
         self,
         result: OptimizeResult,
         free_primitives: List[Primitive],
-        substituted_primitive_map: Dict[str, str],
-    ) -> Dict[str, np.ndarray]:
-        # TODO: Add support for anything other than point primitives here..
-        final_positions = {
-            p.id: np.array([p.x, p.y]) for p in self.primitives if isinstance(p, Point)
-        }
-
+        substitution_map: Dict[str, str],
+    ) -> Dict[str, float]:
+        # Create a map of the variables that were actually solved for.
         final_vars = result.x
-        var_idx = 0
+        free_var_ids = [
+            v
+            for p in free_primitives
+            for v in p.get_variable_ids()
+            if v not in substitution_map
+        ]
+        solved_values = {var_id: final_vars[i] for i, var_id in enumerate(free_var_ids)}
 
-        for p in free_primitives:
-            if isinstance(p, Point):
-                final_positions[p.id] = final_vars[var_idx : var_idx + 2]
-                var_idx += 2
+        # Now, build the complete map for all variables.
+        final_variable_values: Dict[str, float] = {}
+        all_vars = [v for p in self.primitives for v in p.get_variable_ids()]
+
+        for var_id in all_vars:
+            # Find the root representative for this variable.
+            root = find(var_id, substitution_map)
+
+            # The final value is either from the solved set, or it's the initial
+            # value of the primitive that owns the root variable.
+            if root in solved_values:
+                final_variable_values[var_id] = solved_values[root]
             else:
-                raise UnsupportedPrimitiveError(type(p).__name__)
+                # This variable was substituted by a variable that was constant.
+                # Find its original value.
+                # TODO: This underscore stuff is _nasty_.
+                root_prim_id = root.split("_")[0]
+                root_var_type = root.split("_")[1]
+                root_prim = self.primitive_map[root_prim_id]
 
-        # If substitution was used, propagate solved values to originals.
-        for original_id, simplified_id in substituted_primitive_map.items():
-            if original_id != simplified_id and original_id in self.primitive_map:
-                if simplified_id in final_positions:
-                    final_positions[original_id] = final_positions[simplified_id]
+                # This part remains coupled for now.
+                if isinstance(root_prim, Point):
+                    if root_var_type == "x":
+                        final_variable_values[var_id] = root_prim.x
+                    elif root_var_type == "y":
+                        final_variable_values[var_id] = root_prim.y
 
-        return final_positions
+        return final_variable_values
 
     def assess_solver_result(
         self,
-        final_positions: Dict[str, np.ndarray],
+        final_variable_values: Dict[str, float],
         constraints_solved: List[Constraint],
     ) -> None:
-        # Assess the quality of the solver result by computing constraint residuals.
+        # Assess the quality of the result using the final variable map.
+
+        # Build the legacy 'positions' dictionary that get_residual expects.
+        positions: Dict[str, np.ndarray] = {}
+        for p in self.primitives:
+            if isinstance(p, Point):
+                x = final_variable_values.get(f"{p.id}_x", p.x)
+                y = final_variable_values.get(f"{p.id}_y", p.y)
+                positions[p.id] = np.array([x, y])
 
         # Recalculate residuals using only the geometric constraints that were solved.
         # This ignores the regularization terms included in `result.fun`.
-        constraint_residuals = [
-            c.get_residual(final_positions) for c in constraints_solved
-        ]
+        constraint_residuals = [c.get_residual(positions) for c in constraints_solved]
         constraint_errors = [np.max(np.abs(r)) for r in constraint_residuals]
         geometric_residuals = np.concatenate(constraint_residuals)
         max_error = np.max(np.abs(geometric_residuals))
@@ -342,49 +376,14 @@ class Solver2D(ABC):
 
         return
 
-    def update_primitives_from_result(
-        self,
-        result: OptimizeResult,
-        free_primitives: List[Primitive],
-        substituted_primitive_map: Dict[str, str],
+    def update_primitives_from_map(
+        self, final_variable_values: Dict[str, float]
     ) -> None:
-        # Update primitive objects with the final solved positions.
+        for p in self.primitives:
+            # TODO: Handle other primitive types
+            if isinstance(p, Point):
+                p.x = final_variable_values.get(f"{p.id}_x", p.x)
+                p.y = final_variable_values.get(f"{p.id}_y", p.y)
 
-        # Update the simplified primitives that were actually solved for.
-        final_vars = result.x
-        i_var = 0
-
-        for p in free_primitives:
-            num_vars = len(p.get_variable_ids())
-            if num_vars > 0:
-                solved_values = final_vars[i_var : i_var + num_vars]
-                # TODO:  A better design would be a method on the primitive
-                # like `p.update_state(solved_values)`. For now, we must use isinstance.
-                if isinstance(p, Point):
-                    p.x, p.y = solved_values[0], solved_values[1]
-                else:
-                    raise UnsupportedPrimitiveError(type(p).__name__)
-
-                i_var += num_vars
-
-        # Update any original primitives that were substituted.
-        for original_id, simplified_id in substituted_primitive_map.items():
-            if original_id != simplified_id and original_id in self.primitive_map:
-                simplified_primitive = self.primitive_map[simplified_id]
-                original_primitive = self.primitive_map[original_id]
-
-                # Again, this part is coupled but necessary for now.
-                if isinstance(original_primitive, Point) and isinstance(
-                    simplified_primitive, Point
-                ):
-                    original_primitive.x, original_primitive.y = (
-                        simplified_primitive.x,
-                        simplified_primitive.y,
-                    )
-                else:
-                    raise UnsupportedPrimitiveError(type(original_primitive).__name__)
-                logger.debug(
-                    f"Updated substituted primitive {original_id} from {simplified_id}"
-                )
-
+        logger.debug("Updated all primitives from final variable map.")
         return

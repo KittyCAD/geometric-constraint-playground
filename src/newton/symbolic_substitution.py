@@ -1,5 +1,3 @@
-from typing import Dict, List, Set
-
 from newton.constants import EPS
 from newton.constraints import (
     Constraint,
@@ -11,10 +9,10 @@ from newton.constraints import (
     PointPointYDistance,
 )
 from newton.logging_config import logger
-from newton.primitives import Line, Point
+from newton.primitives import Line, Point, Primitive
 
 
-def find(var_id: str, parent_map: Dict[str, str]) -> str:
+def find(var_id: str, parent_map: dict[str, str]) -> str:
     # Find the root of the set.
     root = var_id
     while root in parent_map:
@@ -30,7 +28,7 @@ def find(var_id: str, parent_map: Dict[str, str]) -> str:
     return root
 
 
-def union(var1_id: str, var2_id: str, parent_map: Dict[str, str]):
+def union(var1_id: str, var2_id: str, parent_map: dict[str, str]):
     root1 = find(var1_id, parent_map)
     root2 = find(var2_id, parent_map)
 
@@ -39,30 +37,38 @@ def union(var1_id: str, var2_id: str, parent_map: Dict[str, str]):
         parent_map[root1] = root2
 
 
-def get_substituted_point(
-    p: Point, parent_map: Dict[str, str], point_map: Dict[str, Point]
-) -> Point:
-    # Returns a new Point object pointing to the surrogate IDs.
-    x_var_id = f"{p.id}_x"
-    y_var_id = f"{p.id}_y"
+def get_substituted_primitive(
+    p: Primitive,
+    parent_map: dict[str, str],
+    primitive_map: dict[str, Primitive],
+) -> Primitive:
+    # Finds the single primitive that `p` has been substituted with.
+    # It's used to rewrite constraints that require a full primitive object.
 
-    # Find the surrogate ID for the x and y coordinates
-    x_repr_id = find(x_var_id, parent_map).split("_")[0]
-    y_repr_id = find(y_var_id, parent_map).split("_")[0]
-
-    # If the surrogate is the same as the original, return the original point.
-    if x_repr_id == p.id and y_repr_id == p.id:
+    # Find the root primitive ID for the first variable of p. This is our candidate
+    # for the new representative primitive.
+    variable_ids = p.get_variable_ids()
+    if not variable_ids:
         return p
 
-    # If they've been substituted, return the surrogate Point objects.
-    # Note: This assumes we can substitute x and y to different points,
-    # which is possible with X/Y distance constraints.
-    repr_point_id = find(x_var_id, parent_map).split("_")[0]
-    return point_map[repr_point_id]
+    first_var_root = find(variable_ids[0], parent_map)
+    representative_prim_id = first_var_root.split("_")[0]
+
+    # Check if all other variables of p map to this same representative primitive.
+    for var_id in variable_ids[1:]:
+        root = find(var_id, parent_map)
+        prim_id = root.split("_")[0]
+        if prim_id != representative_prim_id:
+            # This is a partial substitution (e.g., only x-coords are equal).
+            # We cannot rewrite the constraint with a single new primitive, so we return
+            # the original.
+            return p
+
+    return primitive_map[representative_prim_id]
 
 
 def rewrite_constraint(
-    c: Constraint, parent_map: Dict[str, str], point_map: Dict[str, Point]
+    c: Constraint, parent_map: dict[str, str], primitive_map: dict[str, Primitive]
 ) -> Constraint:
     # Creates a new constraint object with substituted primitives.
     match c:
@@ -71,21 +77,38 @@ def rewrite_constraint(
             | PointPointXDistance()
             | PointPointYDistance()
         ):
-            p1_sub = get_substituted_point(c.p1, parent_map, point_map)
-            p2_sub = get_substituted_point(c.p2, parent_map, point_map)
+            p1_sub = get_substituted_primitive(c.p1, parent_map, primitive_map)
+            p2_sub = get_substituted_primitive(c.p2, parent_map, primitive_map)
+
+            if not isinstance(p1_sub, Point) or not isinstance(p2_sub, Point):
+                return c
+
             return type(c)(p1=p1_sub, p2=p2_sub, distance=c.distance)
 
         case LineHorizontal() | LineVertical():
-            p1_sub = get_substituted_point(c.line.p1, parent_map, point_map)
-            p2_sub = get_substituted_point(c.line.p2, parent_map, point_map)
+            p1_sub = get_substituted_primitive(c.line.p1, parent_map, primitive_map)
+            p2_sub = get_substituted_primitive(c.line.p2, parent_map, primitive_map)
+
+            if not isinstance(p1_sub, Point) or not isinstance(p2_sub, Point):
+                return c
+
             new_line = Line(p1=p1_sub, p2=p2_sub, id=c.line.id)
             return type(c)(line=new_line)
 
         case LinesParallel():
-            l1_p1_sub = get_substituted_point(c.line1.p1, parent_map, point_map)
-            l1_p2_sub = get_substituted_point(c.line1.p2, parent_map, point_map)
-            l2_p1_sub = get_substituted_point(c.line2.p1, parent_map, point_map)
-            l2_p2_sub = get_substituted_point(c.line2.p2, parent_map, point_map)
+            l1_p1_sub = get_substituted_primitive(c.line1.p1, parent_map, primitive_map)
+            l1_p2_sub = get_substituted_primitive(c.line1.p2, parent_map, primitive_map)
+            l2_p1_sub = get_substituted_primitive(c.line2.p1, parent_map, primitive_map)
+            l2_p2_sub = get_substituted_primitive(c.line2.p2, parent_map, primitive_map)
+
+            if (
+                not isinstance(l1_p1_sub, Point)
+                or not isinstance(l1_p2_sub, Point)
+                or not isinstance(l2_p1_sub, Point)
+                or not isinstance(l2_p2_sub, Point)
+            ):
+                return c
+
             new_line1 = Line(p1=l1_p1_sub, p2=l1_p2_sub, id=c.line1.id)
             new_line2 = Line(p1=l2_p1_sub, p2=l2_p2_sub, id=c.line2.id)
             return LinesParallel(line1=new_line1, line2=new_line2)
@@ -100,8 +123,8 @@ def rewrite_constraint(
 
 
 def perform_symbolic_substitution(
-    constraints: List[Constraint], points: List[Point]
-) -> tuple[List[Constraint], Dict[str, str]]:
+    constraints: list[Constraint], primitives: list[Primitive]
+) -> tuple[list[Constraint], dict[str, str]]:
     """
     Performs a symbolic substitution pass on a constraint system.
 
@@ -113,36 +136,46 @@ def perform_symbolic_substitution(
     Returns: (simplified_constraints, point_id_mapping)
     where point_id_mapping maps original_point_id -> simplified_point_id
     """
-    point_map = {p.id: p for p in points}
+    primitive_map = {p.id: p for p in primitives}
 
     # https://www.geeksforgeeks.org/dsa/introduction-to-disjoint-set-data-structure-or-union-find-algorithm/
-    parent_map: Dict[str, str] = {}
-    substitution_map: Dict[str, str] = {}
+    parent_map: dict[str, str] = {}
+    substitution_map: dict[str, str] = {}
+    constraints_to_skip: set[int] = set()
 
-    constraints_to_skip: Set[int] = set()
-
-    # Build the equivalence sets using 'Union-Find'.
     # Build the equivalence sets using 'Union-Find'.
     for i, c in enumerate(constraints):
         match c:
             case PointPointEuclideanDistance() if c.distance < EPS:
-                p1_id, p2_id = c.p1.id, c.p2.id
-                union(f"{p1_id}_x", f"{p2_id}_x", parent_map)
-                union(f"{p1_id}_y", f"{p2_id}_y", parent_map)
+                # All variables of p1 and p2 become equivalent.
+                for v1, v2 in zip(c.p1.get_variable_ids(), c.p2.get_variable_ids()):
+                    union(v1, v2, parent_map)
                 constraints_to_skip.add(i)
 
             case PointPointXDistance() if c.distance < EPS:
-                p1_id, p2_id = c.p1.id, c.p2.id
-                union(f"{p1_id}_x", f"{p2_id}_x", parent_map)
+                # Only the 'x' variables become equivalent.
+                p1_x_var = c.p1.get_variable_ids()[0]
+                p2_x_var = c.p2.get_variable_ids()[0]
+                union(p1_x_var, p2_x_var, parent_map)
                 constraints_to_skip.add(i)
 
             case PointPointYDistance() if c.distance < EPS:
-                p1_id, p2_id = c.p1.id, c.p2.id
-                union(f"{p1_id}_y", f"{p2_id}_y", parent_map)
+                # Only the 'y' variables become equivalent.
+                p1_y_var = c.p1.get_variable_ids()[1]
+                p2_y_var = c.p2.get_variable_ids()[1]
+                union(p1_y_var, p2_y_var, parent_map)
                 constraints_to_skip.add(i)
 
-    # Build the final substitution map from variable to surrogate.
-    all_var_ids = {f"{p.id}_{coord}" for p in point_map.values() for coord in "xy"}
+        # TODO: Handle other constraint types.
+
+    # Now build the substitution map at the variable level.
+
+    # Get all variables from all primitives.
+    all_var_ids = {
+        var_id for p in primitive_map.values() for var_id in p.get_variable_ids()
+    }
+
+    # For each variable, find its ultimate root/representative.
     for var_id in all_var_ids:
         root = find(var_id, parent_map)
         if root != var_id:
@@ -152,29 +185,15 @@ def perform_symbolic_substitution(
         logger.info("No substitutions found. Returning original constraints.")
         return constraints, {}
 
-    logger.info(f"Found {len(substitution_map)} substitutions to perform.")
+    logger.info(f"Found {len(substitution_map)} variable substitutions to perform.")
+    logger.debug(f"Substitution map: {substitution_map}")
 
-    # Rewrite the constraint list
-    simplified_constraints: List[Constraint] = []
+    # Rewrite the constraint list using the new primitive set.
+    simplified_constraints: list[Constraint] = []
     for i, c in enumerate(constraints):
         if i in constraints_to_skip:
             continue
-
-        new_c = rewrite_constraint(c, parent_map, point_map)
+        new_c = rewrite_constraint(c, parent_map, primitive_map)
         simplified_constraints.append(new_c)
 
-    # Build the final point mapping
-    point_id_mapping = {}
-    for point in points:
-        x_root = find(f"{point.id}_x", parent_map).split("_")[0]
-        y_root = find(f"{point.id}_y", parent_map).split("_")[0]
-
-        # For now, assume x and y map to the same simplified point
-        # (your substitution logic should ensure this for valid geometric constraints)
-        assert x_root == y_root, (
-            f"Point {point.id} has split coordinates: x→{x_root}, y→{y_root}"
-        )
-
-        point_id_mapping[point.id] = x_root
-
-    return simplified_constraints, point_id_mapping
+    return simplified_constraints, substitution_map

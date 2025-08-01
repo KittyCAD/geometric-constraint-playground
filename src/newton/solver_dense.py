@@ -34,7 +34,7 @@ class Solver2DDense(Solver2D):
     def solve_constraint_system(self, system: Dict[str, Any]):
         free_primitives: List[Primitive] = system["free_primitives"]
         constraints: List[Constraint] = system["constraints"]
-        substituted_primitive_map: Dict[str, str] = system["substituted_primitive_map"]
+        substitution_map: Dict[str, str] = system["substitution_map"]
 
         if not free_primitives or not constraints:
             logger.debug("Skipping block: No free primitives or no constraints.")
@@ -46,7 +46,10 @@ class Solver2DDense(Solver2D):
 
         # Create an ordered list of all variables we can solve for.
         free_var_ids = [
-            var_id for p in free_primitives for var_id in p.get_variable_ids()
+            var_id
+            for p in free_primitives
+            for var_id in p.get_variable_ids()
+            if var_id not in substitution_map
         ]
 
         # Build the initial guess array based on this ordered list.
@@ -164,12 +167,10 @@ class Solver2DDense(Solver2D):
         )
 
         # Run checks and update.
-        final_positions = self.compute_final_positions(
-            result, free_primitives, substituted_primitive_map
+        final_variable_values = self.compute_final_variable_values(
+            result, free_primitives, substitution_map
         )
-        self.assess_solver_result(final_positions, constraints)
-        self.update_primitives_from_result(
-            result, free_primitives, substituted_primitive_map
-        )
+        self.update_primitives_from_map(final_variable_values)
+        self.assess_solver_result(final_variable_values, constraints)
 
         return

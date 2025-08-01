@@ -88,4 +88,16 @@ It also seems that sparse solvers are well-optimised for dealing with the partia
 systems that exist in this case; they exploit the zeros in the matrix to avoid unnecessary
 calculations.
 
-This does, however, highlight the likely importance of using a suitable sparse solver.
+This does, however, highlight the likely importance of using a suitable sparse solver. It seems that
+a good sparse solver will make significant use of this sort of structural aspect of the problem.
+
+# Todos and caveats for the reader
+
+- We currently only deal with free points, even if these are defined as part of a line primitive.
+  - We do not deal with, e.g., arcs where we might need a more complex representation of the
+    primitive.
+- Although we reference free 'primitives', there are several `UnsupportedPrimitiveError` exceptions
+  in the code that indicate that we are not yet handling all primitive types. The code is currently
+  only set up to handle `Point` primitives.
+- The symbolic substitution only deals with a small set of the scenarios where this could be
+  applied. We'll need to add more if this sort of approach is to be useful in production.
