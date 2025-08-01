@@ -224,41 +224,21 @@ class Solver2D(ABC):
         )
         logger.info(f"Using {self.__class__.__name__}.")
 
-        # Then, for each separable system, find the sequential solving order.
+        # Then, for each separable system, solve.
         for system in constraint_systems:
             if not system["constraints"]:
                 continue
 
-            # Pass the complete list of points for the subsystem to the analyser.
-            # ! TODO: This is non-deterministic and can lead to underdetermined systems
-            # ! failing to solve.
-            analyzer = StructuralAnalyzer(system["constraints"], system["points"])
-            sequential_blocks = analyzer.find_solving_sequence()
+            # Dumb 1:1 mapping; only to keep the interface consistent.
+            point_map = {p.id: p.id for p in self.points}
 
-            # Now, for each sequential block, we determine its specific free points
-            # before passing that to the numerical solver.
-            for block in sequential_blocks:
-                # A block contains all points involved in its solution.
-                all_points_in_block = block["points"]
-
-                # We filter this list against the globally free points to find
-                # which variables can be solved in this block.
-                free_points_in_block = [
-                    p for p in all_points_in_block if p in self.free_points
-                ]
-
-                # Only call the numerical solver if there are actual variables to solve for.
-                # A block might only contain a PointFixed constraint, which has no free points.
-
-                # Dumb 1:1 mapping; only to keep the interface consistent.
-                point_map = {p.id: p.id for p in all_points_in_block}
-                if free_points_in_block:
-                    solver_block = {
-                        "free_points": free_points_in_block,
-                        "constraints": block["constraints"],
-                        "substituted_point_map": point_map,
-                    }
-                    self.solve_constraint_system(solver_block)
+            if self.free_points:
+                solver_block = {
+                    "free_points": self.free_points,
+                    "constraints": self.constraints,
+                    "substituted_point_map": point_map,
+                }
+                self.solve_constraint_system(solver_block)
 
     def solve_with_subtitution(self):
         if not self.constraints:
