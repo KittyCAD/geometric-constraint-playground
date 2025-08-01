@@ -20,7 +20,7 @@ constraints are satisfied, all residuals will be zero (within some tolerance).
 This approach lets us frame the problem as a multivariable root-finding problem, which we solve
 using a non-linear least-squares algorithm.
 
-## Structural Optimisation
+## Structural optimisation
 
 The solve can be 'structurally' optimised in two ways that we care about:
 
@@ -84,7 +84,7 @@ calculations.
 This does, however, highlight the likely importance of using a suitable sparse solver. It seems that
 a good sparse solver will make significant use of this sort of structural aspect of the problem.
 
-## Solve Method
+## Solve method
 
 The core of the solver currently uses `scipy.optimize.least_squares` with the Trust Region
 Reflective (`trf`) algorithm because it plays nicely with a sparse Jacobian. However, we should be
@@ -112,15 +112,15 @@ expensive this would be.
 
 ## Todos and caveats for the reader
 
-- **Primitive Support:** The solver currently only reasons about free `Point` primitives, even when
+- **Primitive support:** The solver currently only reasons about free `Point` primitives, even when
   they are part of a `Line`. Extending the framework to other geometric primitives like arcs or
   circles would require defining their variables (e.g., center, radius) and implementing the
   corresponding residual and Jacobian functions. Several `UnsupportedPrimitiveError` exceptions in
   the code highlight this shortcoming.
-- **Symbolic Substitution:** The substitution logic is currently limited to a few point-based
+- **Symbolic substitution:** The substitution logic is currently limited to a few point-based
   equality constraints. To be fully effective, this should be expanded to handle more scenarios
   where variables can be eliminated.
-- **Solver Choice:** The codebase includes both a sparse solver (manual Jacobians) and a dense
+- **Solver choice:** The codebase includes both a sparse solver (manual Jacobians) and a dense
   solver (using JAX for auto-differentiation). A sparse solver approach seems like it should be
   significantly more performant for this problem domain and we should index hard on that.
   - Sympy was used extensively to arrive at our manual derivatives; see `derivative_deriver.py`.
