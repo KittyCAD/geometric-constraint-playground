@@ -23,7 +23,7 @@ from newton.solver_sparse import Solver2DSparse
 
 configure_logging(level=logging.INFO)
 
-PLOT = False
+PLOT = True
 
 
 def add_random_error(points: list[Point], error_range: float = 1.0, seed: int = 42):
@@ -152,14 +152,10 @@ def constrain_rectangles():
         plt.show()
 
 
-def constrain_decomposable():
-    """
-    Creates a system that is fully connected, but can be sequentially decomposed
-    by the StructuralAnalyzer.
-    """
+def constrain_parallel_offset():
     p0 = Point(x=1.0, y=1.0, id="P0")
     p1 = Point(x=2.5, y=1.5, id="P1")
-    p2 = Point(x=1.5, y=3.0, id="P2")
+    p2 = Point(x=-1.5, y=3.0, id="P2")
     p3 = Point(x=3.5, y=4.0, id="P3")
 
     line1 = Line(p0, p1, "L1")
@@ -176,7 +172,7 @@ def constrain_decomposable():
         LinesParallel(line1, line2),
         LinesEqualLength(line1, line2),
         LineLineDistance(line1, line2, distance=2.0),
-        PointPointXDistance(p0, p2, distance=1),
+        PointPointXDistance(p2, p0, distance=1),
     ]
 
     # Plot initial state.
@@ -194,7 +190,6 @@ def constrain_decomposable():
         plot_geometry(points, lines, color="blue", label="Solved", prime=True)
 
         plt.legend()
-        plt.title("Decomposable System Solved Sequentially")
         plt.xlabel("X")
         plt.ylabel("Y")
         plt.axis("equal")
@@ -281,8 +276,8 @@ if __name__ == "__main__":
     profiler = Profiler()
     profiler.start()
 
-    # constrain_rectangles()
-    # constrain_decomposable()
+    constrain_rectangles()
+    constrain_parallel_offset()
     constrain_underdetermined()
 
     profiler.stop()
