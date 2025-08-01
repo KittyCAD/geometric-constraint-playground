@@ -8,14 +8,15 @@ from scipy.sparse import csc_matrix, diags, lil_matrix, vstack
 import newton.backend as nb
 from newton.constants import REGULARIZATION_LAMBDA
 from newton.constraints import Constraint
+from newton.exceptions import UnsupportedPrimitiveError
 from newton.logging_config import logger
-from newton.primitives import Point
+from newton.primitives import Point, Primitive
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 
 class Solver2DSparse(Solver2D):
-    def __init__(self, points: List[Point], constraints: List[Constraint]):
-        super().__init__(points, constraints)
+    def __init__(self, primitives: List[Primitive], constraints: List[Constraint]):
+        super().__init__(primitives, constraints)
 
         # Handle backend setup.
         nb.set_backend(nb.Backend.NUMPY)
@@ -36,15 +37,17 @@ class Solver2DSparse(Solver2D):
 
         for constraint in constraints:
             try:
+                # The constraint should now have full variable IDs.
                 entries = constraint.get_jacobian_section(positions)
-                for point_id, coord, value, residual_idx in entries:
-                    var_name = f"{point_id}_{coord}"
-                    if var_name in var_map:
-                        col_idx = var_map[var_name]
+
+                for var_id, value, residual_idx in entries:
+                    if var_id in var_map:
+                        col_idx = var_map[var_id]
                         jacobian[current_row + residual_idx, col_idx] += value
+
             except NotImplementedError as e:
                 logger.warning(f"Skipping constraint {type(constraint).__name__}: {e}")
-                # Skip this constraint's jacobian entries
+
             current_row += constraint.get_residual_dim()
 
         logger.debug("Jacobian:\n%s", jacobian.toarray())
@@ -52,36 +55,78 @@ class Solver2DSparse(Solver2D):
         return jacobian.tocsc()
 
     def solve_constraint_system(self, system: Dict[str, Any]):
-        free_points: List[Point] = system["free_points"]
+        free_primitives: List[Primitive] = system["free_primitives"]
         constraints: List[Constraint] = system["constraints"]
-        substituted_point_map: Dict[str, str] = system["substituted_point_map"]
+        substituted_primitive_map: Dict[str, str] = system["substituted_primitive_map"]
 
-        if not free_points or not constraints:
+        if not free_primitives or not constraints:
             logger.debug("Skipping block: No free points or no constraints.")
             return
 
         logger.debug(
-            f"Solving independently soluble system: {[p.id for p in free_points]}"
+            f"Solving independently soluble system: {[p.id for p in free_primitives]}"
         )
 
-        initial_guess = np.array([[p.x, p.y] for p in free_points]).flatten()
-        var_map = {
-            f"{p.id}_{c}": i * 2 + j
-            for i, p in enumerate(free_points)
-            for j, c in enumerate("xy")
-        }
+        free_var_ids = [
+            var_id for p in free_primitives for var_id in p.get_variable_ids()
+        ]
 
-        def get_all_positions(free_vars: np.ndarray) -> Dict[str, np.ndarray]:
-            positions = {p.id: np.array([p.x, p.y]) for p in self.points}
-            for i, p in enumerate(free_points):
-                positions[p.id] = free_vars[i * 2 : i * 2 + 2]
+        # Generic variable map for the free variables.
+        var_map = {var_id: i for i, var_id in enumerate(free_var_ids)}
+
+        # Build the initial guess array based on the ordered variable list.
+        initial_values = []
+        prim_map = {p.id: p for p in self.primitives}
+        for var_id in free_var_ids:
+            prim_id, var_type = var_id.split("_")
+            p = prim_map[prim_id]
+
+            # Isolate Point-specific logic.
+            if isinstance(p, Point):
+                if var_type == "x":
+                    initial_values.append(p.x)
+                elif var_type == "y":
+                    initial_values.append(p.y)
+            else:
+                raise UnsupportedPrimitiveError(type(p).__name__)
+
+        initial_guess = np.array(initial_values)
+
+        def build_inputs_for_constraints(
+            free_vars: np.ndarray,
+        ) -> Dict[str, np.ndarray]:
+            # This function provides the `positions` dict that get_residual expects.
+
+            # Start with the initial state of all primitives.
+            # TODO: Handle other primitive types.
+            positions = {
+                p.id: np.array([p.x, p.y])
+                for p in self.primitives
+                if isinstance(p, Point)
+            }
+
+            if any(not isinstance(p, Point) for p in free_primitives):
+                raise NotImplementedError(
+                    "Only Point primitives are currently supported."
+                )
+
+            # Create a dictionary of the solved variable values.
+            solved_vars = {
+                var_id: free_vars[i] for i, var_id in enumerate(free_var_ids)
+            }
+
+            # Overwrite the positions of free points with the new solved values.
+            free_point_ids = {p.id for p in free_primitives if isinstance(p, Point)}
+            for pid in free_point_ids:
+                new_x = solved_vars.get(f"{pid}_x", positions[pid][0])
+                new_y = solved_vars.get(f"{pid}_y", positions[pid][1])
+                positions[pid] = np.array([new_x, new_y])
+
             return positions
 
         def residuals_vector(free_vars: np.ndarray) -> np.ndarray:
-            # Builds an augmented residual vector for the constraints.
-            # The augmentation helps us achieve a minimum-norm solution to
-            # the underdetermined system.
-            positions = get_all_positions(free_vars)
+            # Use the new generic helper function.
+            positions = build_inputs_for_constraints(free_vars)
 
             # Original constraint residuals.
             constraint_residuals = np.concatenate(
@@ -95,7 +140,8 @@ class Solver2DSparse(Solver2D):
             return np.concatenate([constraint_residuals, reg_residuals])
 
         def jacobian_wrapper(free_vars: np.ndarray) -> csc_matrix:
-            positions = get_all_positions(free_vars)
+            # Use the new generic helper function.
+            positions = build_inputs_for_constraints(free_vars)
 
             # Original constraint Jacobian.
             jacobian = self.build_sparse_jacobian(system, var_map, positions)
@@ -141,9 +187,11 @@ class Solver2DSparse(Solver2D):
 
         # Run checks and update.
         final_positions = self.compute_final_positions(
-            result, free_points, substituted_point_map
+            result, free_primitives, substituted_primitive_map
         )
         self.assess_solver_result(final_positions, constraints)
-        self.update_points_from_result(result, free_points, substituted_point_map)
+        self.update_primitives_from_result(
+            result, free_primitives, substituted_primitive_map
+        )
 
         return

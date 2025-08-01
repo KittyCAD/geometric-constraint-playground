@@ -12,16 +12,12 @@ from newton.constants import CONFIG_USE_SYMB_SUB, NONZERO_RANK_TOLERANCE
 from newton.constraint_validator import ConstraintValidator
 from newton.constraints import (
     Constraint,
-    LineLength,
-    LineLineDistance,
-    LinesEqualLength,
     PointFixed,
-    PointPointXDistance,
-    PointPointYDistance,
 )
+from newton.exceptions import UnsupportedPrimitiveError
 from newton.logging_config import logger
 from newton.matrix_utils import compute_rank
-from newton.primitives import Point
+from newton.primitives import Point, Primitive
 from newton.symbolic_substitution import perform_symbolic_substitution
 
 SOLVE_VALIDATION_TOLERANCE = 1e-6  ## Our maximum allowed error on any constraint.
@@ -40,78 +36,50 @@ if logger.isEnabledFor(logging.DEBUG):
 
 
 class Solver2D(ABC):
-    def __init__(self, points: List[Point], constraints: List[Constraint]):
-        self.points = points
-        self.point_map = {p.id: p for p in points}
+    def __init__(self, primitives: List[Primitive], constraints: List[Constraint]):
+        self.primitives = primitives
+        self.primitive_map = {p.id: p for p in primitives}
         self.constraints: List[Constraint] = constraints
-        self.free_points = self.identify_free_points()
+        self.free_primitives = self.identify_free_primitives()
 
         self.module: ModuleType = (
             np  # Default to numpy, can be overridden by subclasses.
         )
 
-    def identify_free_points(self) -> List[Point]:
-        # Find the non-fixed points our solver can play tunes with.
+    def identify_free_primitives(self) -> List[Primitive]:
+        # Find the non-fixed elements our solver can play tunes with.
         # However... we actually do want to feed fixed points to the structural analyzer,
         # because they may be help in solving other parts of the system.
-        fixed_point_ids = set()
+        fixed_primitive_ids = set()
         for c in self.constraints:
             if isinstance(c, PointFixed):
-                fixed_point_ids.add(c.point.id)
+                fixed_primitive_ids.add(c.point.id)
 
-        return [p for p in self.points if p.id not in fixed_point_ids]
+        return [p for p in self.primitives if p.id not in fixed_primitive_ids]
 
     def build_dependency_graph(self) -> nx.Graph:
-        # The graph must be built with ALL points to correctly identify components
-        # that may be connected by a fixed point.
         graph = nx.Graph()
-        variable_nodes = [f"{p.id}_{c}" for p in self.points for c in ("x", "y")]
-        graph.add_nodes_from(variable_nodes, bipartite=0)
 
-        # Add constraint nodes and edges
+        # Add all variables from all primitives as nodes.
+        for p in self.primitives:
+            for var_id in p.get_variable_ids():
+                graph.add_node(var_id, bipartite=0)  # Variable nodes
+
+        # Add constraint nodes and connect them to the variables they affect.
         for i, c in enumerate(self.constraints):
-            constraint_id = f"C_{i}_{type(c).__name__}"
-            graph.add_node(constraint_id, bipartite=1, constraint_index=i)
+            constraint_node_id = f"C_{i}_{type(c).__name__}"
+            graph.add_node(constraint_node_id, bipartite=1, constraint_index=i)
 
-            # Find which points this constraint depends on.
-            points_involved = []
+            # The constraint itself tells us which primitives are involved.
+            involved_primitive_ids = c.get_involved_primitive_ids()
 
-            from newton.constraints import (
-                LineHorizontal,
-                LineLineAngle,
-                LinesParallel,
-                LinesPerpendicular,
-                LineVertical,
-                PointPointEuclideanDistance,
-            )
-
-            match c:
-                case PointFixed():
-                    points_involved.append(c.point)
-                case (
-                    PointPointEuclideanDistance()
-                    | PointPointXDistance()
-                    | PointPointYDistance()
-                ):
-                    points_involved.extend([c.p1, c.p2])
-                case LinesParallel() | LinesPerpendicular() | LineLineAngle():
-                    points_involved.extend(
-                        [c.line1.p1, c.line1.p2, c.line2.p1, c.line2.p2]
-                    )
-                case LineHorizontal() | LineVertical() | LineLength():
-                    points_involved.extend([c.line.p1, c.line.p2])
-                case LinesEqualLength() | LineLineDistance():
-                    points_involved.extend(
-                        [c.line1.p1, c.line1.p2, c.line2.p1, c.line2.p2]
-                    )
-                case _:
-                    raise ValueError(f"Unknown constraint type: {type(c)}")
-
-            # Add edges only for all unique points involved in the constraint.
-            unique_points_involved = {p.id: p for p in points_involved}.values()
-            for p in unique_points_involved:
-                graph.add_edge(constraint_id, f"{p.id}_x")
-                graph.add_edge(constraint_id, f"{p.id}_y")
+            # For each primitive the constraint touches, connect the constraint to all
+            # of that primitive's variables.
+            for prim_id in involved_primitive_ids:
+                if prim_id in self.primitive_map:
+                    primitive = self.primitive_map[prim_id]
+                    for var_id in primitive.get_variable_ids():
+                        graph.add_edge(constraint_node_id, var_id)
 
         return graph
 
@@ -122,24 +90,24 @@ class Solver2D(ABC):
         constraint_systems = []
 
         for component in nx.connected_components(graph):
-            sub_constraint_indices = {
+            i_comp_constraints = {
                 graph.nodes[node]["constraint_index"]
                 for node in component
                 if graph.nodes[node].get("bipartite") == 1
             }
-            if not sub_constraint_indices:
+            if not i_comp_constraints:
                 continue
 
-            sub_constraints = [self.constraints[i] for i in sub_constraint_indices]
-            sub_point_ids = {
+            comp_constraints = [self.constraints[i] for i in i_comp_constraints]
+            comp_primitive_ids = {
                 node.split("_")[0]
                 for node in component
                 if graph.nodes[node].get("bipartite") == 0
             }
-            sub_points = [self.point_map[pid] for pid in sub_point_ids]
+            comp_primitives = [self.primitive_map[pid] for pid in comp_primitive_ids]
 
             constraint_systems.append(
-                {"constraints": sub_constraints, "points": sub_points}
+                {"constraints": comp_constraints, "primitives": comp_primitives}
             )
         return constraint_systems
 
@@ -208,7 +176,7 @@ class Solver2D(ABC):
             return
 
         # Build a 1:1 point mapping for consistency with the substitution method.
-        self.point_map = {p.id: p for p in self.points}
+        self.primitive_map = {p.id: p for p in self.primitives}
 
         # Split the problem into wholly disconnected problems.
         graph = self.build_dependency_graph()
@@ -229,13 +197,13 @@ class Solver2D(ABC):
                 continue
 
             # Dumb 1:1 mapping; only to keep the interface consistent.
-            point_map = {p.id: p.id for p in self.points}
+            primitive_map = {p.id: p.id for p in self.primitives}
 
-            if self.free_points:
+            if self.free_primitives:
                 solver_block = {
-                    "free_points": self.free_points,
+                    "free_primitives": self.free_primitives,
                     "constraints": self.constraints,
-                    "substituted_point_map": point_map,
+                    "substituted_primitive_map": primitive_map,
                 }
                 self.solve_constraint_system(solver_block)
 
@@ -262,64 +230,76 @@ class Solver2D(ABC):
             if not system["constraints"]:
                 continue
 
-            # Get both simplified constraints and the point mapping.
-            simplified_constraints, simplified_point_map = (
+            # Get both simplified constraints and the primitive mapping.
+            simplified_constraints, simplified_primitive_map = (
                 perform_symbolic_substitution(system["constraints"], system["points"])
             )
 
-            # Get the simplified point list
-            simplified_points = self.get_simplified_points(simplified_constraints)
+            # Get the simplified primitive list.
+            simplified_primitives = self.get_simplified_primitives(
+                simplified_constraints
+            )
 
-            # Use simplified points for the free point calculation
-            free_points = self.get_free_points_from_simplified(simplified_points)
+            # Use simplified primitives for the free primitive calculation
+            free_primitives = self.get_free_primitives_from_simplified(
+                simplified_primitives
+            )
 
-            if free_points:
+            if free_primitives:
                 solver_block = {
-                    "free_points": free_points,
+                    "free_primitives": free_primitives,
                     "constraints": simplified_constraints,
-                    "substituted_point_map": simplified_point_map,
+                    "substituted_primitive_map": simplified_primitive_map,
                 }
                 self.solve_constraint_system(solver_block)
 
-    def get_simplified_points(
+    def get_simplified_primitives(
         self, simplified_constraints: List[Constraint]
-    ) -> List[Point]:
-        point_ids = set()
+    ) -> List[Primitive]:
+        primitive_ids = set()
         for c in simplified_constraints:
-            primitive_ids = c.get_involved_primitive_ids()
-            point_ids.update(primitive_ids)
+            primitive_ids.update(c.get_involved_primitive_ids())
 
-        return [self.point_map[pid] for pid in point_ids if pid in self.point_map]
+        return [
+            self.primitive_map[pid]
+            for pid in primitive_ids
+            if pid in self.primitive_map
+        ]
 
-    def get_free_points_from_simplified(
-        self, simplified_points: List[Point]
-    ) -> List[Point]:
-        fixed_point_ids = set()
+    def get_free_primitives_from_simplified(
+        self, simplified_primitives: List[Primitive]
+    ) -> List[Primitive]:
+        fixed_primitive_ids = set()
         for c in self.constraints:  # Check against all original constraints.
             if isinstance(c, PointFixed):
-                fixed_point_ids.add(c.point.id)
+                fixed_primitive_ids.add(c.point.id)
 
-        return [p for p in simplified_points if p.id not in fixed_point_ids]
+        return [p for p in simplified_primitives if p.id not in fixed_primitive_ids]
 
     def compute_final_positions(
         self,
         result: OptimizeResult,
-        free_points: List[Point],
-        substituted_point_map: Dict[str, str],
+        free_primitives: List[Primitive],
+        substituted_primitive_map: Dict[str, str],
     ) -> Dict[str, np.ndarray]:
-        # Compute final positions for all points from the solver result.
+        # TODO: Add support for anything other than point primitives here..
+        final_positions = {
+            p.id: np.array([p.x, p.y]) for p in self.primitives if isinstance(p, Point)
+        }
 
-        # Start with current positions of all points.
-        final_positions = {p.id: np.array([p.x, p.y]) for p in self.points}
-
-        # Update positions for the free points that were solved.
         final_vars = result.x
-        for i, p in enumerate(free_points):
-            final_positions[p.id] = final_vars[i * 2 : i * 2 + 2]
+        var_idx = 0
 
-        # If substitution was used, propagate solved positions to original points.
-        for original_id, simplified_id in substituted_point_map.items():
-            if original_id != simplified_id and original_id in self.point_map:
+        for p in free_primitives:
+            if isinstance(p, Point):
+                final_positions[p.id] = final_vars[var_idx : var_idx + 2]
+                var_idx += 2
+            else:
+                raise UnsupportedPrimitiveError(type(p).__name__)
+
+        # If substitution was used, propagate solved values to originals.
+        for original_id, simplified_id in substituted_primitive_map.items():
+            if original_id != simplified_id and original_id in self.primitive_map:
                 if simplified_id in final_positions:
                     final_positions[original_id] = final_positions[simplified_id]
 
@@ -362,30 +342,49 @@ class Solver2D(ABC):
 
         return
 
-    def update_points_from_result(
+    def update_primitives_from_result(
         self,
         result: OptimizeResult,
-        free_points: List[Point],
-        substituted_point_map: Dict[str, str],
+        free_primitives: List[Primitive],
+        substituted_primitive_map: Dict[str, str],
     ) -> None:
-        # Update point objects with the final solved positions.)
+        # Update primitive objects with the final solved positions.
 
-        # Update the simplified points that were actually solved for.
+        # Update the simplified primitives that were actually solved for.
         final_vars = result.x
-        for i, p in enumerate(free_points):
-            p.x, p.y = final_vars[i * 2], final_vars[i * 2 + 1]
+        i_var = 0
 
-        # Update any original points that were substituted.
-        for original_id, simplified_id in substituted_point_map.items():
-            if original_id != simplified_id and original_id in self.point_map:
-                simplified_point = self.point_map[simplified_id]
-                original_point = self.point_map[original_id]
-                original_point.x, original_point.y = (
-                    simplified_point.x,
-                    simplified_point.y,
-                )
+        for p in free_primitives:
+            num_vars = len(p.get_variable_ids())
+            if num_vars > 0:
+                solved_values = final_vars[i_var : i_var + num_vars]
+                # TODO:  A better design would be a method on the primitive
+                # like `p.update_state(solved_values)`. For now, we must use isinstance.
+                if isinstance(p, Point):
+                    p.x, p.y = solved_values[0], solved_values[1]
+                else:
+                    raise UnsupportedPrimitiveError(type(p).__name__)
+
+                i_var += num_vars
+
+        # Update any original primitives that were substituted.
+        for original_id, simplified_id in substituted_primitive_map.items():
+            if original_id != simplified_id and original_id in self.primitive_map:
+                simplified_primitive = self.primitive_map[simplified_id]
+                original_primitive = self.primitive_map[original_id]
+
+                # Again, this part is coupled but necessary for now.
+                if isinstance(original_primitive, Point) and isinstance(
+                    simplified_primitive, Point
+                ):
+                    original_primitive.x, original_primitive.y = (
+                        simplified_primitive.x,
+                        simplified_primitive.y,
+                    )
+                else:
+                    raise UnsupportedPrimitiveError(type(original_primitive).__name__)
                 logger.debug(
-                    f"Updated substituted point {original_id} from {simplified_id}"
+                    f"Updated substituted primitive {original_id} from {simplified_id}"
                 )
 
         return

@@ -15,14 +15,15 @@ from scipy.optimize import least_squares
 import newton.backend as nb
 from newton.constants import NONZERO_RANK_TOLERANCE, REGULARIZATION_LAMBDA
 from newton.constraints import Constraint
+from newton.exceptions import UnsupportedPrimitiveError
 from newton.logging_config import logger
-from newton.primitives import Point
+from newton.primitives import Point, Primitive
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 
 class Solver2DDense(Solver2D):
-    def __init__(self, points: List[Point], constraints: List[Constraint]):
-        super().__init__(points, constraints)
+    def __init__(self, primitives: List[Primitive], constraints: List[Constraint]):
+        super().__init__(primitives, constraints)
 
         # Handle backend setup.
         # This actually creeps up on our solve tolerance, so we need 64-bit precision.
@@ -31,32 +32,78 @@ class Solver2DDense(Solver2D):
         self.module = jnp
 
     def solve_constraint_system(self, system: Dict[str, Any]):
-        free_points: List[Point] = system["free_points"]
+        free_primitives: List[Primitive] = system["free_primitives"]
         constraints: List[Constraint] = system["constraints"]
-        substituted_point_map: Dict[str, str] = system["substituted_point_map"]
+        substituted_primitive_map: Dict[str, str] = system["substituted_primitive_map"]
 
-        if not free_points or not constraints:
-            logger.debug("Skipping block: No free points or no constraints.")
+        if not free_primitives or not constraints:
+            logger.debug("Skipping block: No free primitives or no constraints.")
             return
 
         logger.debug(
-            f"Solving independently soluble system: {[p.id for p in free_points]}"
+            f"Solving independently soluble system: {[p.id for p in free_primitives]}"
         )
 
-        initial_guess = np.array([[p.x, p.y] for p in free_points]).flatten()
+        # Create an ordered list of all variables we can solve for.
+        free_var_ids = [
+            var_id for p in free_primitives for var_id in p.get_variable_ids()
+        ]
+
+        # Build the initial guess array based on this ordered list.
+        initial_values = []
+        prim_map = {p.id: p for p in self.primitives}
+        for var_id in free_var_ids:
+            prim_id, var_type = var_id.split("_")
+            p = prim_map[prim_id]
+
+            # TODO: Handle other primitive types.
+            if isinstance(p, Point):
+                if var_type == "x":
+                    initial_values.append(p.x)
+                elif var_type == "y":
+                    initial_values.append(p.y)
+            else:
+                raise UnsupportedPrimitiveError(type(p).__name__)
+
+        initial_guess = np.array(initial_values)
         jnp_initial_guess = jnp.asarray(initial_guess)
 
-        def get_all_positions_jax(free_vars: jnp.ndarray) -> Dict[str, jnp.ndarray]:
-            positions = {p.id: jnp.array([p.x, p.y]) for p in self.points}
-            for i, p in enumerate(free_points):
-                positions[p.id] = free_vars[i * 2 : i * 2 + 2]
+        def build_inputs_for_constraints_jax(
+            free_vars: jnp.ndarray,
+        ) -> Dict[str, jnp.ndarray]:
+            # This function provides the `positions` dict that get_residual expects.
+
+            # Start with the initial state of all primitives.
+            # TODO: Handle other primitive types.
+            positions = {
+                p.id: jnp.array([p.x, p.y])
+                for p in self.primitives
+                if isinstance(p, Point)
+            }
+
+            if any(not isinstance(p, Point) for p in free_primitives):
+                raise NotImplementedError(
+                    "Only Point primitives are currently supported."
+                )
+
+            # Create a dictionary of the solved variable values.
+            solved_vars = {
+                var_id: free_vars[i] for i, var_id in enumerate(free_var_ids)
+            }
+
+            # Overwrite the positions of free points with the new solved values.
+            # We group variables by primitive ID.
+            free_point_ids = {p.id for p in free_primitives if isinstance(p, Point)}
+            for pid in free_point_ids:
+                new_x = solved_vars.get(f"{pid}_x", positions[pid][0])
+                new_y = solved_vars.get(f"{pid}_y", positions[pid][1])
+                positions[pid] = jnp.array([new_x, new_y])
+
             return positions
 
         def residuals_vector(free_vars: jnp.ndarray) -> jnp.ndarray:
-            # Builds an augmented residual vector for the constraints.
-            # The augmentation helps us achieve a minimum-norm solution to
-            # the underdetermined system.
-            positions = get_all_positions_jax(free_vars)
+            positions = build_inputs_for_constraints_jax(free_vars)
+
             constraint_residuals = jnp.concatenate(
                 [c.get_residual(positions) for c in constraints]
             )
@@ -118,9 +165,11 @@ class Solver2DDense(Solver2D):
 
         # Run checks and update.
         final_positions = self.compute_final_positions(
-            result, free_points, substituted_point_map
+            result, free_primitives, substituted_primitive_map
         )
         self.assess_solver_result(final_positions, constraints)
-        self.update_points_from_result(result, free_points, substituted_point_map)
+        self.update_primitives_from_result(
+            result, free_primitives, substituted_primitive_map
+        )
 
         return
