@@ -139,7 +139,11 @@ class Solver2DSparse(Solver2D):
             verbose=2 if logger.isEnabledFor(logging.DEBUG) else 0,
         )
 
-        # Pass the point mapping to the update method.
+        # Run checks and update.
+        final_positions = self.compute_final_positions(
+            result, free_points, substituted_point_map
+        )
+        self.assess_solver_result(final_positions, constraints)
         self.update_points_from_result(result, free_points, substituted_point_map)
 
         return

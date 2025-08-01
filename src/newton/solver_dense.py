@@ -25,6 +25,8 @@ class Solver2DDense(Solver2D):
         super().__init__(points, constraints)
 
         # Handle backend setup.
+        # This actually creeps up on our solve tolerance, so we need 64-bit precision.
+        jax.config.update("jax_enable_x64", True)
         nb.set_backend(nb.Backend.JAX)
         self.module = jnp
 
@@ -113,6 +115,12 @@ class Solver2DDense(Solver2D):
             gtol=SOLVER_CONVERGENCE_TOLERANCE,
             verbose=2 if logger.isEnabledFor(logging.DEBUG) else 0,
         )
+
+        # Run checks and update.
+        final_positions = self.compute_final_positions(
+            result, free_points, substituted_point_map
+        )
+        self.assess_solver_result(final_positions, constraints)
         self.update_points_from_result(result, free_points, substituted_point_map)
 
         return

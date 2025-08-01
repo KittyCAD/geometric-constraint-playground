@@ -301,38 +301,91 @@ class Solver2D(ABC):
 
         return [p for p in simplified_points if p.id not in fixed_point_ids]
 
+    def compute_final_positions(
+        self,
+        result: OptimizeResult,
+        free_points: List[Point],
+        substituted_point_map: Dict[str, str],
+    ) -> Dict[str, np.ndarray]:
+        # Compute final positions for all points from the solver result.
+
+        # Start with current positions of all points.
+        final_positions = {p.id: np.array([p.x, p.y]) for p in self.points}
+
+        # Update positions for the free points that were solved.
+        final_vars = result.x
+        for i, p in enumerate(free_points):
+            final_positions[p.id] = final_vars[i * 2 : i * 2 + 2]
+
+        # If substitution was used, propagate solved positions to original points.
+        for original_id, simplified_id in substituted_point_map.items():
+            if original_id != simplified_id and original_id in self.point_map:
+                if simplified_id in final_positions:
+                    final_positions[original_id] = final_positions[simplified_id]
+
+        return final_positions
+
+    def assess_solver_result(
+        self,
+        final_positions: Dict[str, np.ndarray],
+        constraints_solved: List[Constraint],
+    ) -> None:
+        # Assess the quality of the solver result by computing constraint residuals.
+
+        # Recalculate residuals using only the geometric constraints that were solved.
+        # This ignores the regularization terms included in `result.fun`.
+        constraint_residuals = [
+            c.get_residual(final_positions) for c in constraints_solved
+        ]
+        constraint_errors = [np.max(np.abs(r)) for r in constraint_residuals]
+        geometric_residuals = np.concatenate(constraint_residuals)
+        max_error = np.max(np.abs(geometric_residuals))
+
+        if max_error > SOLVE_VALIDATION_TOLERANCE:
+            # Find which constraint(s) failed the tolerance check.
+            failing_constraints = []
+            for i, (c, error) in enumerate(zip(constraints_solved, constraint_errors)):
+                if error > SOLVE_VALIDATION_TOLERANCE:
+                    points_involved = c.get_involved_primitive_ids()
+                    failing_constraints.append(
+                        (i, type(c).__name__, error, points_involved)
+                    )
+
+            # Log the constraint and points that failed.
+            if failing_constraints:
+                logger.warning(f"Solver failed tolerance. Max error: {max_error}")
+                for i, c_type, error, points in failing_constraints:
+                    logger.warning(
+                        f"  - Constraint {i} ({c_type}) failed with error {error:.6f}"
+                    )
+                    logger.warning(f"    Points involved: {points}")
+
+        return
+
     def update_points_from_result(
         self,
         result: OptimizeResult,
         free_points: List[Point],
         substituted_point_map: Dict[str, str],
-    ):
-        if result.success:
-            # TODO: This kind of validation should really only look at the points
-            # with constraints applied; our error to underconstrained points
-            # isn't as relevant.
-            max_error = np.max(np.abs(result.fun))
-            if max_error > SOLVE_VALIDATION_TOLERANCE:
-                raise ValueError(f"Solver failed tolerance. Max error: {max_error}")
+    ) -> None:
+        # Update point objects with the final solved positions.)
 
-            final_vars = result.x
+        # Update the simplified points that were actually solved for.
+        final_vars = result.x
+        for i, p in enumerate(free_points):
+            p.x, p.y = final_vars[i * 2], final_vars[i * 2 + 1]
 
-            # Update the simplified points that were actually solved for.
-            for i, p in enumerate(free_points):
-                p.x, p.y = final_vars[i * 2], final_vars[i * 2 + 1]
+        # Update any original points that were substituted.
+        for original_id, simplified_id in substituted_point_map.items():
+            if original_id != simplified_id and original_id in self.point_map:
+                simplified_point = self.point_map[simplified_id]
+                original_point = self.point_map[original_id]
+                original_point.x, original_point.y = (
+                    simplified_point.x,
+                    simplified_point.y,
+                )
+                logger.debug(
+                    f"Updated substituted point {original_id} from {simplified_id}"
+                )
 
-            # Update any original points that were substituted.
-            for original_id, simplified_id in substituted_point_map.items():
-                if original_id != simplified_id and original_id in self.point_map:
-                    simplified_point = self.point_map[simplified_id]
-                    original_point = self.point_map[original_id]
-                    original_point.x, original_point.y = (
-                        simplified_point.x,
-                        simplified_point.y,
-                    )
-                    logger.debug(
-                        f"Updated substituted point {original_id} from {simplified_id}"
-                    )
-
-        else:
-            raise ValueError(f"Solver failed to find a solution: {result.message}")
+        return
