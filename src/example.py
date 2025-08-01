@@ -17,13 +17,13 @@ from newton.constraints import (
     PointPointYDistance,
 )
 from newton.logging_config import configure_logging, logger
-from newton.primitives import Line, Point
+from newton.primitives import Line, Point, Primitive
 from newton.solver_dense import Solver2DDense
 from newton.solver_sparse import Solver2DSparse
 
 configure_logging(level=logging.INFO)
 
-PLOT = True
+PLOT = False
 
 
 def add_random_error(points: list[Point], error_range: float = 1.0, seed: int = 42):
@@ -125,14 +125,16 @@ def constrain_rectangles():
     ]
 
     # Combine all geometry and constraints for the solver
-    all_points = points1 + points2
+    all_points: list[Primitive] = []
+    all_points.extend(points1)
+    all_points.extend(points2)
     all_lines = lines1 + lines2
     all_constraints = constraints1 + constraints2
 
     # Plot initial state
     if PLOT:
         plt.figure(figsize=(8, 8))
-        plot_geometry(all_points, all_lines, color="red", label="Initial")
+        plot_geometry(all_points, all_lines, color="red", label="Initial")  # type: ignore
 
     # Sooooooolve it.
     Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
@@ -141,7 +143,7 @@ def constrain_rectangles():
 
     # Plot final state.
     if PLOT:
-        plot_geometry(all_points, all_lines, color="blue", label="Solved", prime=True)
+        plot_geometry(all_points, all_lines, color="blue", label="Solved", prime=True)  # type: ignore
 
         plt.legend()
         plt.title("Rectangles From Constraints")
@@ -161,6 +163,7 @@ def constrain_parallel_offset():
     line1 = Line(p0, p1, "L1")
     line2 = Line(p2, p3, "L2")
 
+    points: list[Primitive] = []
     points = [p0, p1, p2, p3]
     lines = [line1, line2]
 
@@ -178,7 +181,7 @@ def constrain_parallel_offset():
     # Plot initial state.
     if PLOT:
         plt.figure(figsize=(8, 8))
-        plot_geometry(points, lines, color="red", label="Initial")
+        plot_geometry(points, lines, color="red", label="Initial")  # type: ignore
 
     # Sooooooolve it.
     Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
@@ -187,9 +190,10 @@ def constrain_parallel_offset():
 
     # Plot final state.
     if PLOT:
-        plot_geometry(points, lines, color="blue", label="Solved", prime=True)
+        plot_geometry(points, lines, color="blue", label="Solved", prime=True)  # type: ignore
 
         plt.legend()
+        plt.title("Parallel Offset Lines")
         plt.xlabel("X")
         plt.ylabel("Y")
         plt.axis("equal")
@@ -212,6 +216,7 @@ def constrain_underdetermined():
     points_to_modify = [p1, p2, p3, p4, p5]
     add_random_error(points_to_modify, error_range=1.0, seed=42)
 
+    points: list[Primitive] = []
     points = [p0, *points_to_modify]
 
     line1 = Line(p0, p1, "L1")
@@ -237,7 +242,7 @@ def constrain_underdetermined():
     # Plot initial state.
     if PLOT:
         plt.figure(figsize=(8, 8))
-        plot_geometry(points, lines, color="red", label="Initial")
+        plot_geometry(points, lines, color="red", label="Initial")  # type: ignore
         # plt.show()
 
     # Sooooooolve it.
@@ -247,7 +252,7 @@ def constrain_underdetermined():
 
     # Plot final state.
     if PLOT:
-        plot_geometry(points, lines, color="blue", label="Solved", prime=True)
+        plot_geometry(points, lines, color="blue", label="Solved", prime=True)  # type: ignore
 
         plt.legend()
         plt.title("Underconstrained System")
@@ -276,8 +281,8 @@ if __name__ == "__main__":
     profiler = Profiler()
     profiler.start()
 
-    constrain_rectangles()
-    constrain_parallel_offset()
+    # constrain_rectangles()
+    # constrain_parallel_offset()
     constrain_underdetermined()
 
     profiler.stop()
