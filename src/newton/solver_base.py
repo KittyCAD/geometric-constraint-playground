@@ -8,7 +8,7 @@ import networkx as nx
 import numpy as np
 from scipy.optimize import OptimizeResult
 
-from newton.constants import NONZERO_RANK_TOLERANCE
+from newton.constants import NONZERO_RANK_TOLERANCE, USE_SYMBOLIC_SUBSTITUTION
 from newton.constraint_validator import ConstraintValidator
 from newton.constraints import (
     Constraint,
@@ -211,6 +211,65 @@ class Solver2D(ABC):
         pass
 
     def solve(self):
+        if USE_SYMBOLIC_SUBSTITUTION:
+            self.solve_with_subtitution()
+        else:
+            self.solve_without_substitution()
+
+    def solve_without_substitution(self):
+        if not self.constraints:
+            print("No constraints to solve.")
+            return
+
+        # Build a 1:1 point mapping for consistency with the substitution method.
+        self.point_map = {p.id: p for p in self.points}
+
+        # Split the problem into wholly disconnected problems.
+        graph = self.build_dependency_graph()
+        constraint_systems = self.find_disconnected_systems(graph)
+
+        # Validate the constraints in each disconnected system before solving.
+        self.validate_constraint_systems(constraint_systems)
+
+        # If validation passes, proceed with the numerical solve.
+        logger.debug(
+            f"Graph analysis found {len(constraint_systems)} valid disconnected system(s)."
+        )
+        logger.info(f"Using {self.__class__.__name__}.")
+
+        # Then, for each separable system, find the sequential solving order.
+        for system in constraint_systems:
+            if not system["constraints"]:
+                continue
+
+            # Pass the complete list of points for the subsystem to the analyser.
+            # ! TODO: This is non-deterministic and can lead to underdetermined systems
+            # ! failing to solve.
+            analyzer = StructuralAnalyzer(system["constraints"], system["points"])
+            sequential_blocks = analyzer.find_solving_sequence()
+
+            # Now, for each sequential block, we determine its specific free points
+            # before passing that to the numerical solver.
+            for block in sequential_blocks:
+                # A block contains all points involved in its solution.
+                all_points_in_block = block["points"]
+
+                # We filter this list against the globally free points to find
+                # which variables can be solved in this block.
+                free_points_in_block = [
+                    p for p in all_points_in_block if p in self.free_points
+                ]
+
+                # Only call the numerical solver if there are actual variables to solve for.
+                # A block might only contain a PointFixed constraint, which has no free points.
+                if free_points_in_block:
+                    solver_block = {
+                        "free_points": free_points_in_block,
+                        "constraints": block["constraints"],
+                    }
+                    self.solve_constraint_system(solver_block)
+
+    def solve_with_subtitution(self):
         if not self.constraints:
             print("No constraints to solve.")
             return
@@ -233,7 +292,7 @@ class Solver2D(ABC):
             if not system["constraints"]:
                 continue
 
-            # Get both simplified constraints AND the point mapping
+            # Get both simplified constraints and the point mapping.
             simplified_constraints, point_id_mapping = perform_symbolic_substitution(
                 system["constraints"], system["points"]
             )
@@ -260,11 +319,9 @@ class Solver2D(ABC):
                     }
                     self.solve_constraint_system(solver_block)
 
-    # 2. Add helper methods:
     def get_simplified_points(
         self, simplified_constraints: List[Constraint]
     ) -> List[Point]:
-        """Extract all unique points from the simplified constraint system"""
         point_ids = set()
         for c in simplified_constraints:
             primitive_ids = c.get_involved_primitive_ids()
@@ -276,18 +333,17 @@ class Solver2D(ABC):
         self, simplified_points: List[Point]
     ) -> List[Point]:
         fixed_point_ids = set()
-        for c in self.constraints:  # Check against all original constraints
+        for c in self.constraints:  # Check against all original constraints.
             if isinstance(c, PointFixed):
                 fixed_point_ids.add(c.point.id)
 
         return [p for p in simplified_points if p.id not in fixed_point_ids]
 
-    # 3. Update the update_points_from_result method signature:
     def update_points_from_result(
         self,
         result: OptimizeResult,
         free_points: List[Point],
-        point_mapping: Dict[str, str] = None,
+        point_mapping: Dict[str, str],
     ):
         if result.success:
             max_error = np.max(np.abs(result.fun))
@@ -296,23 +352,22 @@ class Solver2D(ABC):
 
             final_vars = result.x
 
-            # Update the simplified points that were actually solved for
+            # Update the simplified points that were actually solved for.
             for i, p in enumerate(free_points):
                 p.x, p.y = final_vars[i * 2], final_vars[i * 2 + 1]
 
-            # Update any original points that were substituted
-            if point_mapping:
-                for original_id, simplified_id in point_mapping.items():
-                    if original_id != simplified_id and original_id in self.point_map:
-                        simplified_point = self.point_map[simplified_id]
-                        original_point = self.point_map[original_id]
-                        original_point.x, original_point.y = (
-                            simplified_point.x,
-                            simplified_point.y,
-                        )
-                        logger.debug(
-                            f"Updated substituted point {original_id} from {simplified_id}"
-                        )
+            # Update any original points that were substituted.
+            for original_id, simplified_id in point_mapping.items():
+                if original_id != simplified_id and original_id in self.point_map:
+                    simplified_point = self.point_map[simplified_id]
+                    original_point = self.point_map[original_id]
+                    original_point.x, original_point.y = (
+                        simplified_point.x,
+                        simplified_point.y,
+                    )
+                    logger.debug(
+                        f"Updated substituted point {original_id} from {simplified_id}"
+                    )
 
         else:
             raise ValueError(f"Solver failed to find a solution: {result.message}")
