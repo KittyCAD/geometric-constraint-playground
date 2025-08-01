@@ -161,3 +161,14 @@ are called and choose whether to plot the results.
 Additionally, `constants.py` contains some configuration options that you can modify to change the
 solver's behaviour, such as whether to use a sparse or dense solver, whether to use symbolic
 substitution, and the convergence tolerance for the solver.
+
+![Example Output](images/example-01.png)
+
+![Example Output](images/example-02.png)
+
+![Example Output](images/example-03.png)
+
+Note the mention of symbolic substitution in the log output of the `constrain_underdetermined()`
+example:
+
+![Example Output](images/example-04.png)
