@@ -22,7 +22,6 @@ from newton.constraints import (
 from newton.logging_config import logger
 from newton.matrix_utils import compute_rank
 from newton.primitives import Point
-from newton.structural_analyzer import StructuralAnalyzer
 from newton.symbolic_substitution import perform_symbolic_substitution
 
 SOLVE_VALIDATION_TOLERANCE = 1e-6  ## Our maximum allowed error on any constraint.
@@ -258,7 +257,7 @@ class Solver2D(ABC):
         )
         logger.info(f"Using {self.__class__.__name__}.")
 
-        # Then, for each separable system, find the sequential solving order.
+        # Then, for each separable system, solve.
         for system in constraint_systems:
             if not system["constraints"]:
                 continue
@@ -271,24 +270,16 @@ class Solver2D(ABC):
             # Get the simplified point list
             simplified_points = self.get_simplified_points(simplified_constraints)
 
-            analyzer = StructuralAnalyzer(simplified_constraints, simplified_points)
-            sequential_blocks = analyzer.find_solving_sequence()
+            # Use simplified points for the free point calculation
+            free_points = self.get_free_points_from_simplified(simplified_points)
 
-            for block in sequential_blocks:
-                # Use simplified points for the free point calculation
-                free_points_in_block = [
-                    p
-                    for p in block["points"]
-                    if p in self.get_free_points_from_simplified(simplified_points)
-                ]
-
-                if free_points_in_block:
-                    solver_block = {
-                        "free_points": free_points_in_block,
-                        "constraints": block["constraints"],
-                        "substituted_point_map": simplified_point_map,
-                    }
-                    self.solve_constraint_system(solver_block)
+            if free_points:
+                solver_block = {
+                    "free_points": free_points,
+                    "constraints": simplified_constraints,
+                    "substituted_point_map": simplified_point_map,
+                }
+                self.solve_constraint_system(solver_block)
 
     def get_simplified_points(
         self, simplified_constraints: List[Constraint]
