@@ -1,10 +1,8 @@
-"""
-Notes:
-- This method is currently significantly slower than the sparse version; I don't think
-  this is actually because of dense vs. sparse, but because we're repeatedly
-  recompiling the JAX functions because we're feeding it things with different
-  shapes.
-"""
+# Notes:
+# - This method is currently significantly slower than the sparse version; I don't think
+#   this is actually because of dense vs. sparse, but because we're repeatedly
+#   recompiling the JAX functions because we're feeding it things with different
+#   shapes.
 
 import logging
 from typing import Any, Dict, List
@@ -33,6 +31,7 @@ class Solver2DDense(Solver2D):
     def solve_constraint_system(self, system: Dict[str, Any]):
         free_points: List[Point] = system["free_points"]
         constraints: List[Constraint] = system["constraints"]
+        substituted_point_map: Dict[str, str] = system["substituted_point_map"]
 
         if not free_points or not constraints:
             logger.debug("Skipping block: No free points or no constraints.")
@@ -120,6 +119,6 @@ class Solver2DDense(Solver2D):
             gtol=SOLVER_CONVERGENCE_TOLERANCE,
             verbose=2 if logger.isEnabledFor(logging.DEBUG) else 0,
         )
-        self.update_points_from_result(result, free_points)
+        self.update_points_from_result(result, free_points, substituted_point_map)
 
         return

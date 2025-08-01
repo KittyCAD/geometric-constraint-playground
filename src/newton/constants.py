@@ -1,6 +1,9 @@
 # Attempt system decomposition.
 DECOMPOSE_SYSTEM = False
 
+# Use symbolic substitution in the solver.
+USE_SYMBOLIC_SUBSTITUTION = False
+
 # Generally used to avoid numerical issues in constraint definitions.
 EPS = 1e-9
 

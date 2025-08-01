@@ -8,7 +8,7 @@ import networkx as nx
 import numpy as np
 from scipy.optimize import OptimizeResult
 
-from newton.constants import NONZERO_RANK_TOLERANCE
+from newton.constants import NONZERO_RANK_TOLERANCE, USE_SYMBOLIC_SUBSTITUTION
 from newton.constraint_validator import ConstraintValidator
 from newton.constraints import (
     Constraint,
@@ -23,6 +23,7 @@ from newton.logging_config import logger
 from newton.matrix_utils import compute_rank
 from newton.primitives import Point
 from newton.structural_analyzer import StructuralAnalyzer
+from newton.symbolic_substitution import perform_symbolic_substitution
 
 SOLVE_VALIDATION_TOLERANCE = 1e-6  ## Our maximum allowed error on any constraint.
 SOLVER_CONVERGENCE_TOLERANCE = 1e-10  ## The tolerance for convergence in the solver.
@@ -42,9 +43,10 @@ if logger.isEnabledFor(logging.DEBUG):
 class Solver2D(ABC):
     def __init__(self, points: List[Point], constraints: List[Constraint]):
         self.points = points
+        self.point_map = {p.id: p for p in points}
         self.constraints: List[Constraint] = constraints
         self.free_points = self.identify_free_points()
-        self.point_map = {p.id: p for p in self.points}
+
         self.module: ModuleType = (
             np  # Default to numpy, can be overridden by subclasses.
         )
@@ -142,20 +144,6 @@ class Solver2D(ABC):
             )
         return constraint_systems
 
-    def update_points_from_result(
-        self, result: OptimizeResult, free_points: List[Point]
-    ):
-        if result.success:
-            max_error = np.max(np.abs(result.fun))
-            if max_error > SOLVE_VALIDATION_TOLERANCE:
-                raise ValueError(f"Solver failed tolerance. Max error: {max_error}")
-
-            final_vars = result.x
-            for i, p in enumerate(free_points):
-                p.x, p.y = final_vars[i * 2], final_vars[i * 2 + 1]
-        else:
-            raise ValueError(f"Solver failed to find a solution: {result.message}")
-
     def validate_constraint_systems(self, systems: List[Dict[str, Any]]) -> None:
         validator = ConstraintValidator()
 
@@ -210,9 +198,18 @@ class Solver2D(ABC):
         pass
 
     def solve(self):
+        if USE_SYMBOLIC_SUBSTITUTION:
+            self.solve_with_subtitution()
+        else:
+            self.solve_without_substitution()
+
+    def solve_without_substitution(self):
         if not self.constraints:
             print("No constraints to solve.")
             return
+
+        # Build a 1:1 point mapping for consistency with the substitution method.
+        self.point_map = {p.id: p for p in self.points}
 
         # Split the problem into wholly disconnected problems.
         graph = self.build_dependency_graph()
@@ -252,9 +249,119 @@ class Solver2D(ABC):
 
                 # Only call the numerical solver if there are actual variables to solve for.
                 # A block might only contain a PointFixed constraint, which has no free points.
+
+                # Dumb 1:1 mapping; only to keep the interface consistent.
+                point_map = {p.id: p.id for p in all_points_in_block}
                 if free_points_in_block:
                     solver_block = {
                         "free_points": free_points_in_block,
                         "constraints": block["constraints"],
+                        "substituted_point_map": point_map,
                     }
                     self.solve_constraint_system(solver_block)
+
+    def solve_with_subtitution(self):
+        if not self.constraints:
+            print("No constraints to solve.")
+            return
+
+        # Split the problem into wholly disconnected problems.
+        graph = self.build_dependency_graph()
+        constraint_systems = self.find_disconnected_systems(graph)
+
+        # Validate the constraints in each disconnected system before solving.
+        self.validate_constraint_systems(constraint_systems)
+
+        # If validation passes, proceed with the numerical solve.
+        logger.debug(
+            f"Graph analysis found {len(constraint_systems)} valid disconnected system(s)."
+        )
+        logger.info(f"Using {self.__class__.__name__}.")
+
+        # Then, for each separable system, find the sequential solving order.
+        for system in constraint_systems:
+            if not system["constraints"]:
+                continue
+
+            # Get both simplified constraints and the point mapping.
+            simplified_constraints, simplified_point_map = (
+                perform_symbolic_substitution(system["constraints"], system["points"])
+            )
+
+            # Get the simplified point list
+            simplified_points = self.get_simplified_points(simplified_constraints)
+
+            analyzer = StructuralAnalyzer(simplified_constraints, simplified_points)
+            sequential_blocks = analyzer.find_solving_sequence()
+
+            for block in sequential_blocks:
+                # Use simplified points for the free point calculation
+                free_points_in_block = [
+                    p
+                    for p in block["points"]
+                    if p in self.get_free_points_from_simplified(simplified_points)
+                ]
+
+                if free_points_in_block:
+                    solver_block = {
+                        "free_points": free_points_in_block,
+                        "constraints": block["constraints"],
+                        "substituted_point_map": simplified_point_map,
+                    }
+                    self.solve_constraint_system(solver_block)
+
+    def get_simplified_points(
+        self, simplified_constraints: List[Constraint]
+    ) -> List[Point]:
+        point_ids = set()
+        for c in simplified_constraints:
+            primitive_ids = c.get_involved_primitive_ids()
+            point_ids.update(primitive_ids)
+
+        return [self.point_map[pid] for pid in point_ids if pid in self.point_map]
+
+    def get_free_points_from_simplified(
+        self, simplified_points: List[Point]
+    ) -> List[Point]:
+        fixed_point_ids = set()
+        for c in self.constraints:  # Check against all original constraints.
+            if isinstance(c, PointFixed):
+                fixed_point_ids.add(c.point.id)
+
+        return [p for p in simplified_points if p.id not in fixed_point_ids]
+
+    def update_points_from_result(
+        self,
+        result: OptimizeResult,
+        free_points: List[Point],
+        substituted_point_map: Dict[str, str],
+    ):
+        if result.success:
+            # TODO: This kind of validation should really only look at the points
+            # with constraints applied; our error to underconstrained points
+            # isn't as relevant.
+            max_error = np.max(np.abs(result.fun))
+            if max_error > SOLVE_VALIDATION_TOLERANCE:
+                raise ValueError(f"Solver failed tolerance. Max error: {max_error}")
+
+            final_vars = result.x
+
+            # Update the simplified points that were actually solved for.
+            for i, p in enumerate(free_points):
+                p.x, p.y = final_vars[i * 2], final_vars[i * 2 + 1]
+
+            # Update any original points that were substituted.
+            for original_id, simplified_id in substituted_point_map.items():
+                if original_id != simplified_id and original_id in self.point_map:
+                    simplified_point = self.point_map[simplified_id]
+                    original_point = self.point_map[original_id]
+                    original_point.x, original_point.y = (
+                        simplified_point.x,
+                        simplified_point.y,
+                    )
+                    logger.debug(
+                        f"Updated substituted point {original_id} from {simplified_id}"
+                    )
+
+        else:
+            raise ValueError(f"Solver failed to find a solution: {result.message}")
