@@ -43,9 +43,10 @@ if logger.isEnabledFor(logging.DEBUG):
 class Solver2D(ABC):
     def __init__(self, points: List[Point], constraints: List[Constraint]):
         self.points = points
+        self.point_map = {p.id: p for p in points}
         self.constraints: List[Constraint] = constraints
         self.free_points = self.identify_free_points()
-        self.point_map = {p.id: p for p in self.points}
+
         self.module: ModuleType = (
             np  # Default to numpy, can be overridden by subclasses.
         )
@@ -262,10 +263,14 @@ class Solver2D(ABC):
 
                 # Only call the numerical solver if there are actual variables to solve for.
                 # A block might only contain a PointFixed constraint, which has no free points.
+
+                # Dumb 1:1 mapping; only to keep the interface consistent.
+                point_map = {p.id: p.id for p in all_points_in_block}
                 if free_points_in_block:
                     solver_block = {
                         "free_points": free_points_in_block,
                         "constraints": block["constraints"],
+                        "substituted_point_map": point_map,
                     }
                     self.solve_constraint_system(solver_block)
 
@@ -293,8 +298,8 @@ class Solver2D(ABC):
                 continue
 
             # Get both simplified constraints and the point mapping.
-            simplified_constraints, point_id_mapping = perform_symbolic_substitution(
-                system["constraints"], system["points"]
+            simplified_constraints, simplified_point_map = (
+                perform_symbolic_substitution(system["constraints"], system["points"])
             )
 
             # Get the simplified point list
@@ -315,7 +320,7 @@ class Solver2D(ABC):
                     solver_block = {
                         "free_points": free_points_in_block,
                         "constraints": block["constraints"],
-                        "point_mapping": point_id_mapping,
+                        "substituted_point_map": simplified_point_map,
                     }
                     self.solve_constraint_system(solver_block)
 
@@ -343,7 +348,7 @@ class Solver2D(ABC):
         self,
         result: OptimizeResult,
         free_points: List[Point],
-        point_mapping: Dict[str, str],
+        substituted_point_map: Dict[str, str],
     ):
         if result.success:
             max_error = np.max(np.abs(result.fun))
@@ -357,7 +362,7 @@ class Solver2D(ABC):
                 p.x, p.y = final_vars[i * 2], final_vars[i * 2 + 1]
 
             # Update any original points that were substituted.
-            for original_id, simplified_id in point_mapping.items():
+            for original_id, simplified_id in substituted_point_map.items():
                 if original_id != simplified_id and original_id in self.point_map:
                     simplified_point = self.point_map[simplified_id]
                     original_point = self.point_map[original_id]

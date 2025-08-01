@@ -22,7 +22,7 @@ from newton.solver_sparse import Solver2DSparse
 
 configure_logging(level=logging.DEBUG)
 
-USE_SPARSE = True
+USE_SPARSE = False
 PLOT = True
 
 

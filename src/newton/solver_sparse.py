@@ -54,7 +54,7 @@ class Solver2DSparse(Solver2D):
     def solve_constraint_system(self, system: Dict[str, Any]):
         free_points: List[Point] = system["free_points"]
         constraints: List[Constraint] = system["constraints"]
-        point_mapping = system.get("point_mapping", {})
+        substituted_point_map: Dict[str, str] = system["substituted_point_map"]
 
         if not free_points or not constraints:
             logger.debug("Skipping block: No free points or no constraints.")
@@ -140,6 +140,6 @@ class Solver2DSparse(Solver2D):
         )
 
         # Pass the point mapping to the update method.
-        self.update_points_from_result(result, free_points, point_mapping)
+        self.update_points_from_result(result, free_points, substituted_point_map)
 
         return
