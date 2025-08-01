@@ -65,12 +65,6 @@ class Solver2DDense(Solver2D):
             # Combine into the new augmented residual vector.
             residuals = jnp.concatenate([constraint_residuals, reg_residuals])
 
-            # jax.debug.print(
-            #     "Residuals shape: {shape}, values: {values}",
-            #     shape=residuals.shape,
-            #     values=residuals,
-            # )
-
             return residuals
 
         jit_residuals = jax.jit(residuals_vector)

@@ -8,7 +8,7 @@ import networkx as nx
 import numpy as np
 from scipy.optimize import OptimizeResult
 
-from newton.constants import NONZERO_RANK_TOLERANCE, USE_SYMBOLIC_SUBSTITUTION
+from newton.constants import CONFIG_USE_SYMB_SUB, NONZERO_RANK_TOLERANCE
 from newton.constraint_validator import ConstraintValidator
 from newton.constraints import (
     Constraint,
@@ -197,7 +197,7 @@ class Solver2D(ABC):
         pass
 
     def solve(self):
-        if USE_SYMBOLIC_SUBSTITUTION:
+        if CONFIG_USE_SYMB_SUB:
             self.solve_with_subtitution()
         else:
             self.solve_without_substitution()

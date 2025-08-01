@@ -4,6 +4,7 @@ import random
 import matplotlib.pyplot as plt
 from pyinstrument import Profiler
 
+from newton.constants import CONFIG_USE_SPARSE_SOLVE
 from newton.constraints import (
     LineHorizontal,
     LineLineDistance,
@@ -22,7 +23,6 @@ from newton.solver_sparse import Solver2DSparse
 
 configure_logging(level=logging.DEBUG)
 
-USE_SPARSE = True
 PLOT = True
 
 
@@ -135,7 +135,7 @@ def constrain_rectangles():
         plot_geometry(all_points, all_lines, color="red", label="Initial")
 
     # Sooooooolve it.
-    Solver2D = Solver2DSparse if USE_SPARSE else Solver2DDense
+    Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
     solver = Solver2D(all_points, all_constraints)
     solver.solve()
 
@@ -185,7 +185,7 @@ def constrain_decomposable():
         plot_geometry(points, lines, color="red", label="Initial")
 
     # Sooooooolve it.
-    Solver2D = Solver2DSparse if USE_SPARSE else Solver2DDense
+    Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
     solver = Solver2D(points, constraints)
     solver.solve()
 
@@ -246,7 +246,7 @@ def constrain_underdetermined():
         # plt.show()
 
     # Sooooooolve it.
-    Solver2D = Solver2DSparse if USE_SPARSE else Solver2DDense
+    Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
     solver = Solver2D(points, constraints)
     solver.solve()
 
