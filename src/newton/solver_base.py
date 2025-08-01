@@ -144,20 +144,6 @@ class Solver2D(ABC):
             )
         return constraint_systems
 
-    # def update_points_from_result(
-    #     self, result: OptimizeResult, free_points: List[Point]
-    # ):
-    #     if result.success:
-    #         max_error = np.max(np.abs(result.fun))
-    #         if max_error > SOLVE_VALIDATION_TOLERANCE:
-    #             raise ValueError(f"Solver failed tolerance. Max error: {max_error}")
-
-    #         final_vars = result.x
-    #         for i, p in enumerate(free_points):
-    #             p.x, p.y = final_vars[i * 2], final_vars[i * 2 + 1]
-    #     else:
-    #         raise ValueError(f"Solver failed to find a solution: {result.message}")
-
     def validate_constraint_systems(self, systems: List[Dict[str, Any]]) -> None:
         validator = ConstraintValidator()
 
@@ -351,6 +337,9 @@ class Solver2D(ABC):
         substituted_point_map: Dict[str, str],
     ):
         if result.success:
+            # TODO: This kind of validation should really only look at the points
+            # with constraints applied; our error to underconstrained points
+            # isn't as relevant.
             max_error = np.max(np.abs(result.fun))
             if max_error > SOLVE_VALIDATION_TOLERANCE:
                 raise ValueError(f"Solver failed tolerance. Max error: {max_error}")
