@@ -76,6 +76,10 @@ class Solver2DSparse(Solver2D):
             if var_id not in substitution_map
         ]
 
+        # Deduplicate variable IDs.
+        # TODO: Not happy with deduplicating here...
+        free_var_ids = list(dict.fromkeys(free_var_ids))
+
         # Generic variable map for the free variables.
         var_map = {var_id: i for i, var_id in enumerate(free_var_ids)}
 

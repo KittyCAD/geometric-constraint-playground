@@ -218,6 +218,41 @@ def compute_line_line_distance_derivatives():
         print(f"∂R/∂{var} = {simplified}")
 
 
+def compute_line_tangent_to_circle_derivatives():
+    # ! TODO: Check this, this is LLM slop output.
+    x1, y1, x2, y2, xc, yc, r = sp.symbols("x1 y1 x2 y2 xc yc r", real=True)
+
+    # Vector for the line segment: v = P2 - P1
+    v_x = x2 - x1
+    v_y = y2 - y1
+
+    # Vector from line start to circle center: w = Center - P1
+    w_x = xc - x1
+    w_y = yc - y1
+
+    # Signed cross product (no absolute value)
+    cross_product_2d = v_x * w_y - v_y * w_x
+
+    # Denominator of the distance formula: |v|
+    line_magnitude = sp.sqrt(v_x**2 + v_y**2)
+
+    # Signed distance residual
+    residual = cross_product_2d / line_magnitude - r
+
+    variables = [x1, y1, x2, y2, xc, yc, r]
+
+    print("Signed Distance")
+    print(
+        "Residual: R = ((x2-x1)*(yc-y1) - (y2-y1)*(xc-x1)) / sqrt((x2-x1)**2 + (y2-y1)**2) - r"
+    )
+    print()
+
+    for var in variables:
+        deriv = sp.diff(residual, var)
+        simplified_deriv = sp.simplify(deriv)
+        print(f"∂R/∂{var} = {simplified_deriv}")
+
+
 if __name__ == "__main__":
     # compute_point_fixed_derivatives()
     # compute_point_point_euclidean_distance_derivatives()
@@ -229,4 +264,5 @@ if __name__ == "__main__":
     # compute_lines_perpendicular_derivatives()
     # compute_lines_equal_length_derivatives()
     # compute_line_line_angle_derivatives()
-    compute_line_line_distance_derivatives()
+    # compute_line_line_distance_derivatives()
+    compute_line_tangent_to_circle_derivatives()

@@ -12,6 +12,7 @@ from newton.constraints import (
     LineLineDistance,
     LinesEqualLength,
     LinesParallel,
+    LineTangentToCircle,
     LineVertical,
     PointFixed,
     PointPointEuclideanDistance,
@@ -328,6 +329,49 @@ def constrain_simple_circle():
         plt.show()
 
 
+def constrain_tangent_circle_to_line():
+    # Define the primitives.
+    p1 = Point(x=1.0, y=2.0, id="P1")
+    p2 = Point(x=5.0, y=1.0, id="P2")
+    line = Line(p1, p2, "L1")
+
+    # Start the circle away from the line.
+    center = Point(x=3.0, y=5.0, id="C1_P")
+    circle = Circle(center=center, radius=1.0, id="C1")
+
+    all_primitives = [p1, p2, line, center, circle]
+
+    # Define the constraints.
+    constraints = [
+        PointFixed(point=p1),
+        LineHorizontal(line=line),
+        CircleRadius(circle=circle, radius=2.0),
+        PointPointXDistance(p1, center, distance=2.0),
+        LineTangentToCircle(line=line, circle=circle),
+    ]
+
+    # Plot initial state.
+    if PLOT:
+        plt.figure(figsize=(8, 8))
+        plot_geometry(all_primitives, color="red", label="Initial")
+
+    # Solve.
+    Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
+    solver = Solver2D(all_primitives, constraints)
+    solver.solve()
+
+    # Plot final state.
+    if PLOT:
+        plot_geometry(all_primitives, color="blue", label="Solved", prime=True)
+        plt.legend()
+        plt.title("Line Tangent to Circle")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.axis("equal")
+        plt.grid(True)
+        plt.show()
+
+
 def test_determinism():
     n_passed = 0
     n_failed = 0
@@ -349,7 +393,8 @@ if __name__ == "__main__":
     # constrain_rectangles()
     # constrain_parallel_offset()
     # constrain_underdetermined()
-    constrain_simple_circle()
+    # constrain_simple_circle()
+    constrain_tangent_circle_to_line()
 
     profiler.stop()
     profiler.print()

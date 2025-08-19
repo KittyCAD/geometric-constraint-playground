@@ -302,6 +302,11 @@ class Solver2D(ABC):
             for v in p.get_variable_ids()
             if v not in substitution_map
         ]
+
+        # Deduplicate variable IDs.
+        # TODO: Not happy with deduplicating here...
+        free_var_ids = list(dict.fromkeys(free_var_ids))
+
         solved_values = {var_id: final_vars[i] for i, var_id in enumerate(free_var_ids)}
 
         # Now, build the complete map for all variables.

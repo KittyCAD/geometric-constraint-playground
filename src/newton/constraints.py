@@ -912,6 +912,109 @@ class CircleRadius(BaseConstraint):
         return frozenset(self.circle.get_involved_primitive_ids())
 
 
+@dataclass
+class LineTangentToCircle(BaseConstraint):
+    line: Line
+    circle: Circle
+
+    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+        # Get the current state of the primitives.
+        p1 = self.line.p1.get_state(variable_values)
+        p2 = self.line.p2.get_state(variable_values)
+
+        # Unpack the circle's state: center position and radius.
+        circle_state = self.circle.get_state(variable_values)
+        center, radius = circle_state[:2], circle_state[2]
+
+        # Calculate the signed distance from the circle's center to the line
+        # Formula: distance = (v × w) / |v|
+        # where v is the line vector and w is the vector from p1 to the center.
+        v = p2 - p1
+        w = center - p1
+
+        mag_v = nb.np.linalg.norm(v)
+
+        # Avoid division by zero for a zero-length line segment.
+        if mag_v < EPS:
+            return nb.np.array([0.0])
+
+        # Signed cross product (no absolute value).
+        cross_product = v[0] * w[1] - v[1] * w[0]
+        signed_distance_to_line = cross_product / mag_v
+
+        # The residual is the difference between this signed distance and the circle's radius.
+        return nb.np.array([signed_distance_to_line - radius])
+
+    def get_jacobian_row_values(
+        self, variable_values: Mapping[str, float]
+    ) -> List[Tuple[str, float, int]]:
+        # Residual: R = ((x2-x1)*(yc-y1) - (y2-y1)*(xc-x1)) / sqrt((x2-x1)**2 + (y2-y1)**2) - r
+        # ∂R/∂x1 = (-(x1 - x2)*((x1 - x2)*(y1 - yc) - (x1 - xc)*(y1 - y2)) + (y2 - yc)*((x1 - x2)**2 + (y1 - y2)**2))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
+        # ∂R/∂y1 = ((-x2 + xc)*((x1 - x2)**2 + (y1 - y2)**2) - (y1 - y2)*((x1 - x2)*(y1 - yc) - (x1 - xc)*(y1 - y2)))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
+        # ∂R/∂x2 = ((x1 - x2)*((x1 - x2)*(y1 - yc) - (x1 - xc)*(y1 - y2)) + (-y1 + yc)*((x1 - x2)**2 + (y1 - y2)**2))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
+        # ∂R/∂y2 = ((x1 - xc)*((x1 - x2)**2 + (y1 - y2)**2) + (y1 - y2)*((x1 - x2)*(y1 - yc) - (x1 - xc)*(y1 - y2)))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
+        # ∂R/∂xc = (y1 - y2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        # ∂R/∂yc = (-x1 + x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
+        # ∂R/∂r = -1
+
+        p1 = self.line.p1.get_state(variable_values)
+        p2 = self.line.p2.get_state(variable_values)
+        circle_state = self.circle.get_state(variable_values)
+        center, _ = circle_state[:2], circle_state[2]
+
+        x1, y1 = p1
+        x2, y2 = p2
+        xc, yc = center
+
+        # Calculate common terms.
+        dx = x1 - x2
+        dy = y1 - y2
+        mag_v_sq = dx**2 + dy**2
+
+        if mag_v_sq < EPS:
+            return []
+
+        mag_v = np.sqrt(mag_v_sq)
+        mag_v_cubed = mag_v_sq ** (3 / 2)
+
+        # Cross product term that appears in the derivatives.
+        cross_term = dx * (y1 - yc) - (x1 - xc) * dy
+
+        # fmt: off
+        # ruff: noqa
+        dr_dx1 = (-dx * cross_term + (y2 - yc) * mag_v_sq) / mag_v_cubed
+        dr_dy1 = ((-x2 + xc) * mag_v_sq - dy * cross_term) / mag_v_cubed
+        dr_dx2 = (dx * cross_term + (-y1 + yc) * mag_v_sq) / mag_v_cubed
+        dr_dy2 = ((x1 - xc) * mag_v_sq + dy * cross_term) / mag_v_cubed
+        dr_dxc = (y1 - y2) / mag_v
+        dr_dyc = (-x1 + x2) / mag_v
+        dr_dr = -1.0
+        # fmt: on
+        # ruff: enable
+
+        p1_vars = self.line.p1.get_variable_ids()
+        p2_vars = self.line.p2.get_variable_ids()
+        circle_vars = self.circle.get_variable_ids()
+
+        return [
+            (p1_vars[0], float(dr_dx1), 0),
+            (p1_vars[1], float(dr_dy1), 0),
+            (p2_vars[0], float(dr_dx2), 0),
+            (p2_vars[1], float(dr_dy2), 0),
+            (circle_vars[0], float(dr_dxc), 0),
+            (circle_vars[1], float(dr_dyc), 0),
+            (circle_vars[2], float(dr_dr), 0),
+        ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        # This constraint involves the line, its points, the circle, and its center.
+        return frozenset(
+            self.line.get_involved_primitive_ids().union(
+                self.circle.get_involved_primitive_ids()
+            )
+        )
+
+
 Constraint = Union[
     PointFixed,
     PointPointEuclideanDistance,
@@ -926,4 +1029,5 @@ Constraint = Union[
     LinesEqualLength,
     LineLineDistance,
     CircleRadius,
+    LineTangentToCircle,
 ]
