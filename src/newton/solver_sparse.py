@@ -29,26 +29,28 @@ class Solver2DSparse(Solver2D):
         positions: Dict[str, np.ndarray],
     ) -> csc_matrix:
         constraints: List[Constraint] = subproblem["constraints"]
-        n_residuals = sum(c.get_residual_dim() for c in constraints)
-        n_vars = len(var_map)
 
-        jacobian = lil_matrix((n_residuals, n_vars))
-        current_row = 0
+        n_residuals = sum(c.n_residual_rows for c in constraints)
+        n_variables = len(var_map)
+
+        jacobian = lil_matrix((n_residuals, n_variables))
+
+        i_row = 0
 
         for constraint in constraints:
             try:
                 # The constraint should now have full variable IDs.
-                entries = constraint.get_jacobian_section(positions)
+                entries = constraint.get_jacobian_row_values(positions)
 
-                for var_id, value, residual_idx in entries:
+                for var_id, value, i_row_local in entries:
                     if var_id in var_map:
-                        col_idx = var_map[var_id]
-                        jacobian[current_row + residual_idx, col_idx] += value
+                        i_col = var_map[var_id]
+                        jacobian[i_row + i_row_local, i_col] += value
 
             except NotImplementedError as e:
                 logger.warning(f"Skipping constraint {type(constraint).__name__}: {e}")
 
-            current_row += constraint.get_residual_dim()
+            i_row += constraint.n_residual_rows
 
         logger.debug("Jacobian:\n%s", jacobian.toarray())
 
@@ -170,7 +172,7 @@ class Solver2DSparse(Solver2D):
         # size (REG_LAMBDA * I), which adds n_variables more rows.
         n_variables = jacobian_init.shape[1]
         # n_equations = jacobian_init.shape[0]
-        n_geom_equations = sum(c.get_residual_dim() for c in constraints)
+        n_geom_equations = sum(c.n_residual_rows for c in constraints)
 
         self.check_system_state(jacobian_init.todense(), n_variables, n_geom_equations)
 

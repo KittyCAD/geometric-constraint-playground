@@ -133,7 +133,7 @@ class Solver2DDense(Solver2D):
         # size (REG_LAMBDA * I), which adds n_variables more rows.
         n_variables = jacobian_init.shape[1]
         # n_equations = jacobian_init.shape[0]
-        n_geom_equations = sum(c.get_residual_dim() for c in constraints)
+        n_geom_equations = sum(c.n_residual_rows for c in constraints)
 
         self.check_system_state(jacobian_init, n_variables, n_geom_equations)
 
