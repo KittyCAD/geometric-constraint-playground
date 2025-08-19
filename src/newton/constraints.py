@@ -7,7 +7,7 @@ import numpy as np
 
 from newton import backend as nb
 from newton.constants import EPS
-from newton.primitives import Line, Point
+from newton.primitives import Line, Point, Circle
 
 ArrayLike = Union[np.ndarray, jnp.ndarray]
 
@@ -879,6 +879,39 @@ class LineLineDistance(BaseConstraint):
         return frozenset(ids_1.union(ids_2))
 
 
+@dataclass
+class CircleRadius(BaseConstraint):
+    circle: Circle
+    radius: float
+
+    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+        # We don't need get_state, as we only care about the radius variable.
+
+        # Ask the circle for the ID of its radius variable; the third var.
+        radius_var_id = self.circle.get_variable_ids()[2]
+
+        # Look up the current value of the radius in the map.
+        current_radius = variable_values[radius_var_id]
+
+        return nb.np.array([current_radius - self.radius])
+
+    def get_jacobian_row_values(
+        self, variable_values: Mapping[str, float]
+    ) -> List[Tuple[str, float, int]]:
+        # The residual is R = r_current - r_target.
+        # The only partial derivative that is non-zero is ∂R/∂r_current, which is 1.
+        radius_var_id = self.circle.get_variable_ids()[2]
+
+        # This constraint has a scalar residual.
+        i_residual = 0
+
+        return [(radius_var_id, 1.0, i_residual)]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        # This constraint involves the circle itself.
+        return frozenset(self.circle.get_involved_primitive_ids())
+
+
 Constraint = Union[
     PointFixed,
     PointPointEuclideanDistance,
@@ -892,4 +925,5 @@ Constraint = Union[
     LineVertical,
     LinesEqualLength,
     LineLineDistance,
+    CircleRadius,
 ]

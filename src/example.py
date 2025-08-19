@@ -2,10 +2,12 @@ import logging
 import random
 
 import matplotlib.pyplot as plt
+from matplotlib.patches import Circle as CirclePatch
 from pyinstrument import Profiler
 
 from newton.constants import CONFIG_USE_SPARSE_SOLVE
 from newton.constraints import (
+    CircleRadius,
     LineHorizontal,
     LineLineDistance,
     LinesEqualLength,
@@ -17,7 +19,7 @@ from newton.constraints import (
     PointPointYDistance,
 )
 from newton.logging_config import configure_logging, logger
-from newton.primitives import Line, Point, Primitive
+from newton.primitives import Circle, Line, Point, Primitive
 from newton.solver_dense import Solver2DDense
 from newton.solver_sparse import Solver2DSparse
 
@@ -62,15 +64,40 @@ def draw_line(line: Line, color: str, label: str | None = None):
     )
 
 
-def plot_geometry(
-    points: list[Point], lines: list[Line], color: str, label: str, prime: bool = False
-):
-    for i, line in enumerate(lines):
-        line_label = label if i == 0 else None
-        draw_line(line, color=color, label=line_label)
+def draw_circle(circle: Circle, color: str, label: str | None = None):
+    center_pos = (circle.center.x, circle.center.y)
+    radius = circle.radius
 
-    for point in points:
-        draw_point(point, color=color, prime=prime)
+    circle_patch = CirclePatch(
+        center_pos, radius, color=color, fill=False, label=label, linewidth=1.5
+    )
+    ax = plt.gca()
+    ax.add_patch(circle_patch)
+
+
+def plot_geometry(
+    primitives: list[Primitive], color: str, label: str, prime: bool = False
+):
+    has_labeled_line = False
+    has_labeled_circle = False
+
+    for prim in primitives:
+        if isinstance(prim, Line):
+            line_label = label if not has_labeled_line else None
+            draw_line(prim, color=color, label=line_label)
+            has_labeled_line = True
+        elif isinstance(prim, Circle):
+            circle_label = label if not has_labeled_circle else None
+            draw_circle(prim, color=color, label=circle_label)
+            has_labeled_circle = True
+        elif isinstance(prim, Point):
+            # Points are drawn by themselves after lines/circles to be on top.
+            pass
+
+    # Draw all points last so they appear on top of lines/circles.
+    for prim in primitives:
+        if isinstance(prim, Point):
+            draw_point(prim, color=color, prime=prime)
 
 
 def constrain_rectangles():
@@ -134,7 +161,7 @@ def constrain_rectangles():
     # Plot initial state
     if PLOT:
         plt.figure(figsize=(8, 8))
-        plot_geometry(all_points, all_lines, color="red", label="Initial")  # type: ignore
+        plot_geometry(all_points + all_lines, color="red", label="Initial")  # type: ignore
 
     # Sooooooolve it.
     Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
@@ -143,7 +170,7 @@ def constrain_rectangles():
 
     # Plot final state.
     if PLOT:
-        plot_geometry(all_points, all_lines, color="blue", label="Solved", prime=True)  # type: ignore
+        plot_geometry(all_points + all_lines, color="blue", label="Solved", prime=True)  # type: ignore
 
         plt.legend()
         plt.title("Rectangles From Constraints")
@@ -181,7 +208,7 @@ def constrain_parallel_offset():
     # Plot initial state.
     if PLOT:
         plt.figure(figsize=(8, 8))
-        plot_geometry(points, lines, color="red", label="Initial")  # type: ignore
+        plot_geometry(points + lines, color="red", label="Initial")  # type: ignore
 
     # Sooooooolve it.
     Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
@@ -190,7 +217,7 @@ def constrain_parallel_offset():
 
     # Plot final state.
     if PLOT:
-        plot_geometry(points, lines, color="blue", label="Solved", prime=True)  # type: ignore
+        plot_geometry(points + lines, color="blue", label="Solved", prime=True)  # type: ignore
 
         plt.legend()
         plt.title("Parallel Offset Lines")
@@ -242,7 +269,7 @@ def constrain_underdetermined():
     # Plot initial state.
     if PLOT:
         plt.figure(figsize=(8, 8))
-        plot_geometry(points, lines, color="red", label="Initial")  # type: ignore
+        plot_geometry(points + lines, color="red", label="Initial")  # type: ignore
         # plt.show()
 
     # Sooooooolve it.
@@ -252,10 +279,48 @@ def constrain_underdetermined():
 
     # Plot final state.
     if PLOT:
-        plot_geometry(points, lines, color="blue", label="Solved", prime=True)  # type: ignore
+        plot_geometry(points + lines, color="blue", label="Solved", prime=True)  # type: ignore
 
         plt.legend()
         plt.title("Underconstrained System")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.axis("equal")
+        plt.grid(True)
+        plt.show()
+
+
+def constrain_simple_circle():
+    center_point = Point(x=1.0, y=2.0, id="C1_P")
+
+    # The initial radius is 5.0, but we will constrain it to 3.0.
+    circle = Circle(center=center_point, radius=5.0, id="C1")
+
+    # The solver operates on a single list of all primitives.
+    # The Circle primitive adds "C1_radius" as a variable.
+    # The Point primitive adds "C1_P_x" and "C1_P_y" as variables.
+    all_primitives = [center_point, circle]
+
+    # Define the constraints
+    constraints = [
+        PointFixed(point=center_point),
+        CircleRadius(circle=circle, radius=3.0),
+    ]
+
+    # Plot initial state.
+    if PLOT:
+        plt.figure(figsize=(8, 8))
+        plot_geometry(all_primitives, color="red", label="Initial", prime=False)
+
+    Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
+    solver = Solver2D(all_primitives, constraints)
+    solver.solve()
+
+    # Plot final state.
+    if PLOT:
+        plot_geometry(all_primitives, color="blue", label="Solved", prime=True)
+        plt.legend()
+        plt.title("Simple Circle Constraint")
         plt.xlabel("X")
         plt.ylabel("Y")
         plt.axis("equal")
@@ -281,9 +346,10 @@ if __name__ == "__main__":
     profiler = Profiler()
     profiler.start()
 
-    constrain_rectangles()
+    # constrain_rectangles()
     # constrain_parallel_offset()
     # constrain_underdetermined()
+    constrain_simple_circle()
 
     profiler.stop()
     profiler.print()

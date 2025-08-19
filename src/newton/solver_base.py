@@ -16,7 +16,7 @@ from newton.constraints import (
 )
 from newton.logging_config import logger
 from newton.matrix_utils import compute_rank
-from newton.primitives import Point, Primitive
+from newton.primitives import Circle, Point, Primitive
 from newton.symbolic_substitution import find, perform_symbolic_substitution
 
 SOLVE_VALIDATION_TOLERANCE = 1e-6  ## Our maximum allowed error on any constraint.
@@ -374,10 +374,17 @@ class Solver2D(ABC):
         self, final_variable_values: Dict[str, float]
     ) -> None:
         for p in self.primitives:
-            # TODO: Handle other primitive types
             if isinstance(p, Point):
                 p.x = final_variable_values.get(f"{p.id}_x", p.x)
                 p.y = final_variable_values.get(f"{p.id}_y", p.y)
+
+            elif isinstance(p, Circle):
+                # The circle primitive is responsible for its radius.
+                # We know the variable IDs are [center_x, center_y, radius] so third.
+                radius_var_id = p.get_variable_ids()[2]
+
+                # Update the object's radius attribute with the solved value.
+                p.radius = final_variable_values.get(radius_var_id, p.radius)
 
         logger.debug("Updated all primitives from final variable map.")
         return
