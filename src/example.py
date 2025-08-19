@@ -23,7 +23,7 @@ from newton.solver_sparse import Solver2DSparse
 
 configure_logging(level=logging.INFO)
 
-PLOT = False
+PLOT = True
 
 
 def add_random_error(points: list[Point], error_range: float = 1.0, seed: int = 42):
@@ -281,9 +281,9 @@ if __name__ == "__main__":
     profiler = Profiler()
     profiler.start()
 
-    # constrain_rectangles()
+    constrain_rectangles()
     # constrain_parallel_offset()
-    constrain_underdetermined()
+    # constrain_underdetermined()
 
     profiler.stop()
     profiler.print()

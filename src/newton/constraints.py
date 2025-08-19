@@ -14,14 +14,16 @@ ArrayLike = Union[np.ndarray, jnp.ndarray]
 
 class BaseConstraint(ABC):
     @abstractmethod
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
         pass
 
     @abstractmethod
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:
         # This method is used to calculate (part of) a row of the Jacobian matrix.
+        # Note that variable_values is now a map of specific variable IDs to their scalar values,
+        # not a map of IDs to position arrays.
         pass
 
     @property
@@ -45,11 +47,12 @@ class PointFixed(BaseConstraint):
     def n_residual_rows(self) -> int:
         return 2
 
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        return positions[self.point.id] - self.fixed_pos
+    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+        p = self.point.get_state(variable_values)
+        return p - self.fixed_pos
 
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:
         # Residuals: R1 = px - fx, R2 = py - fy
         # ∂R1/∂px = 1
@@ -84,14 +87,14 @@ class PointPointEuclideanDistance(BaseConstraint):
     p2: Point
     distance: float
 
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        pos1 = positions[self.p1.id]
-        pos2 = positions[self.p2.id]
-        current_dist = nb.np.linalg.norm(pos1 - pos2)
+    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+        p1 = self.p1.get_state(variable_values)
+        p2 = self.p2.get_state(variable_values)
+        current_dist = nb.np.linalg.norm(p1 - p2)
         return nb.np.array([current_dist - self.distance])
 
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = sqrt((x1-x2)**2 + (y1-y2)**2) - d
         # ∂R/∂x1 = (x1 - x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
@@ -100,8 +103,8 @@ class PointPointEuclideanDistance(BaseConstraint):
         # ∂R/∂y2 = (-y1 + y2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
 
         # Derivatives with respect to p1 and p2 and the x/y coordinates thereof.
-        p1 = positions[self.p1.id]
-        p2 = positions[self.p2.id]
+        p1 = self.p1.get_state(variable_values)
+        p2 = self.p2.get_state(variable_values)
 
         # Handle zero-length vectors gracefully.
         dist = nb.np.linalg.norm(p1 - p2)  # sqrt((x1 - x2)**2 + (y1 - y2)**2)
@@ -152,13 +155,13 @@ class PointPointXDistance(BaseConstraint):
     p2: Point
     distance: float
 
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        p1_pos = positions[self.p1.id]
-        p2_pos = positions[self.p2.id]
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
+        p1_pos = self.p1.get_state(variable_values)
+        p2_pos = self.p2.get_state(variable_values)
         return nb.np.array([abs(p1_pos[0] - p2_pos[0]) - self.distance])
 
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:  #
         # Residual: R = |x1 - x2| - d
         # When (x1 - x2) >= 0:
@@ -173,8 +176,8 @@ class PointPointXDistance(BaseConstraint):
         # ∂R/∂x2 = Piecewise((-1, x1 - x2 >= 0), (1, True))
 
         # Get our derivatives.
-        p1 = positions[self.p1.id]
-        p2 = positions[self.p2.id]
+        p1 = self.p1.get_state(variable_values)
+        p2 = self.p2.get_state(variable_values)
 
         x1 = p1[0]
         x2 = p2[0]
@@ -208,13 +211,13 @@ class PointPointYDistance(BaseConstraint):
     p2: Point
     distance: float
 
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        p1_pos = positions[self.p1.id]
-        p2_pos = positions[self.p2.id]
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
+        p1_pos = self.p1.get_state(variable_values)
+        p2_pos = self.p2.get_state(variable_values)
         return nb.np.array([abs(p1_pos[1] - p2_pos[1]) - self.distance])
 
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = |y1 - y2| - d
         # When (y1 - y2) >= 0:
@@ -229,8 +232,8 @@ class PointPointYDistance(BaseConstraint):
         # ∂R/∂y2 = Piecewise((-1, y1 - y2 >= 0), (1, True))
 
         # Get our derivatives.
-        p1 = positions[self.p1.id]
-        p2 = positions[self.p2.id]
+        p1 = self.p1.get_state(variable_values)
+        p2 = self.p2.get_state(variable_values)
 
         y1 = p1[1]
         y2 = p2[1]
@@ -263,20 +266,20 @@ class LineLength(BaseConstraint):
     line: Line
     length: float
 
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        pos1 = positions[self.line.p1.id]
-        pos2 = positions[self.line.p2.id]
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
+        pos1 = self.line.p1.get_state(variable_values)
+        pos2 = self.line.p2.get_state(variable_values)
         current_dist = nb.np.linalg.norm(pos1 - pos2)
         return nb.np.array([current_dist - self.length])
 
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:
         # Reuse the implementation from PointPointEuclideanDistance.
         temp_constraint = PointPointEuclideanDistance(
             p1=self.line.p1, p2=self.line.p2, distance=self.length
         )
-        return temp_constraint.get_jacobian_row_values(positions)
+        return temp_constraint.get_jacobian_row_values(variable_values)
 
     def get_involved_primitive_ids(self) -> frozenset:
         return frozenset(self.line.get_involved_primitive_ids())
@@ -286,13 +289,13 @@ class LineLength(BaseConstraint):
 class LineHorizontal(BaseConstraint):
     line: Line
 
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        p1_pos = positions[self.line.p1.id]
-        p2_pos = positions[self.line.p2.id]
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
+        p1_pos = self.line.p1.get_state(variable_values)
+        p2_pos = self.line.p2.get_state(variable_values)
         return nb.np.array([p1_pos[1] - p2_pos[1]])
 
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = y1 - y2
         # ∂R/∂y1 = 1
@@ -321,13 +324,13 @@ class LineHorizontal(BaseConstraint):
 class LineVertical(BaseConstraint):
     line: Line
 
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        p1_pos = positions[self.line.p1.id]
-        p2_pos = positions[self.line.p2.id]
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
+        p1_pos = self.line.p1.get_state(variable_values)
+        p2_pos = self.line.p2.get_state(variable_values)
         return nb.np.array([p1_pos[0] - p2_pos[0]])
 
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = x1 - x2
         # ∂R/∂x1 = 1
@@ -357,13 +360,21 @@ class LinesParallel(BaseConstraint):
     line1: Line
     line2: Line
 
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        v1 = positions[self.line1.p2.id] - positions[self.line1.p1.id]
-        v2 = positions[self.line2.p2.id] - positions[self.line2.p1.id]
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
+        p1 = self.line1.p1.get_state(variable_values)
+        p2 = self.line1.p2.get_state(variable_values)
+
+        p3 = self.line2.p1.get_state(variable_values)
+        p4 = self.line2.p2.get_state(variable_values)
+
+        # Calculate the vectors.
+        v1 = p2 - p1
+        v2 = p4 - p3
+
         return nb.np.array([v1[0] * v2[1] - v1[1] * v2[0]])
 
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = (x2-x1)*(y4-y3) - (y2-y1)*(x4-x3)
         # ∂R/∂x1 = y3 - y4
@@ -376,10 +387,10 @@ class LinesParallel(BaseConstraint):
         # ∂R/∂y4 = -x1 + x2
 
         # Get points.
-        p1 = positions[self.line1.p1.id]
-        p2 = positions[self.line1.p2.id]
-        p3 = positions[self.line2.p1.id]
-        p4 = positions[self.line2.p2.id]
+        p1 = self.line1.p1.get_state(variable_values)
+        p2 = self.line1.p2.get_state(variable_values)
+        p3 = self.line2.p1.get_state(variable_values)
+        p4 = self.line2.p2.get_state(variable_values)
 
         # Get their components.
         x1, y1 = p1[0], p1[1]
@@ -443,13 +454,24 @@ class LinesPerpendicular(BaseConstraint):
     line1: Line
     line2: Line
 
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        v1 = positions[self.line1.p2.id] - positions[self.line1.p1.id]
-        v2 = positions[self.line2.p2.id] - positions[self.line2.p1.id]
-        return nb.np.array([v1[0] * v2[0] + v1[1] * v2[1]])
+    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+        p1 = self.line1.p1.get_state(variable_values)
+        p2 = self.line1.p2.get_state(variable_values)
+
+        p3 = self.line2.p1.get_state(variable_values)
+        p4 = self.line2.p2.get_state(variable_values)
+
+        # Calculate the vectors.
+        v1 = p2 - p1
+        v2 = p4 - p3
+
+        # The residual is the dot product of the two vectors.
+        # If they are perpendicular, this should be zero.
+        dot = v1[0] * v2[0] + v1[1] * v2[1]
+        return nb.np.array([dot])
 
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = (x2-x1)*(x4-x3) + (y2-y1)*(y4-y3)
         # ∂R/∂x1 = x3 - x4
@@ -462,10 +484,10 @@ class LinesPerpendicular(BaseConstraint):
         # ∂R/∂y4 = -y1 + y2
 
         # Get points.
-        p1 = positions[self.line1.p1.id]
-        p2 = positions[self.line1.p2.id]
-        p3 = positions[self.line2.p1.id]
-        p4 = positions[self.line2.p2.id]
+        p1 = self.line1.p1.get_state(variable_values)
+        p2 = self.line1.p2.get_state(variable_values)
+        p3 = self.line2.p1.get_state(variable_values)
+        p4 = self.line2.p2.get_state(variable_values)
 
         # Get their components.
         x1, y1 = p1[0], p1[1]
@@ -529,17 +551,21 @@ class LinesEqualLength(BaseConstraint):
     line1: Line
     line2: Line
 
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
-        p0, p1 = positions[self.line1.p1.id], positions[self.line1.p2.id]
-        p2, p3 = positions[self.line2.p1.id], positions[self.line2.p2.id]
+    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+        # Get points.
+        p1 = self.line1.p1.get_state(variable_values)
+        p2 = self.line1.p2.get_state(variable_values)
+        p3 = self.line2.p1.get_state(variable_values)
+        p4 = self.line2.p2.get_state(variable_values)
 
-        len1 = nb.np.linalg.norm(p1 - p0)
-        len2 = nb.np.linalg.norm(p3 - p2)
+        # Calculate lengths.
+        len1 = nb.np.linalg.norm(p2 - p1)
+        len2 = nb.np.linalg.norm(p4 - p3)
 
         return nb.np.array([len1 - len2])
 
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = |L1| - |L2|
         # ∂R/∂x1 = (x1 - x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
@@ -552,10 +578,10 @@ class LinesEqualLength(BaseConstraint):
         # ∂R/∂y4 = (y3 - y4)/sqrt((x3 - x4)**2 + (y3 - y4)**2)
 
         # Get points.
-        p1 = positions[self.line1.p1.id]
-        p2 = positions[self.line1.p2.id]
-        p3 = positions[self.line2.p1.id]
-        p4 = positions[self.line2.p2.id]
+        p1 = self.line1.p1.get_state(variable_values)
+        p2 = self.line1.p2.get_state(variable_values)
+        p3 = self.line2.p1.get_state(variable_values)
+        p4 = self.line2.p2.get_state(variable_values)
 
         # Get their components.
         x1, y1 = p1[0], p1[1]
@@ -628,10 +654,15 @@ class LineLineAngle(BaseConstraint):
     line2: Line
     angle: float = field()
 
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
         # Get direction vectors for both lines.
-        v1 = positions[self.line1.p2.id] - positions[self.line1.p1.id]
-        v2 = positions[self.line2.p2.id] - positions[self.line2.p1.id]
+        p1 = self.line1.p1.get_state(variable_values)
+        p2 = self.line1.p2.get_state(variable_values)
+        p3 = self.line2.p1.get_state(variable_values)
+        p4 = self.line2.p2.get_state(variable_values)
+
+        v1 = p2 - p1
+        v2 = p4 - p3
 
         # Calculate magnitudes.
         mag1 = nb.np.linalg.norm(v1)
@@ -654,7 +685,7 @@ class LineLineAngle(BaseConstraint):
         return nb.np.where(is_invalid, nb.np.array([0.0]), angle_residual)
 
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = atan2(v1×v2, v1·v2) - α
         # ∂R/∂x1 = (y1 - y2)/(x1**2 - 2*x1*x2 + x2**2 + y1**2 - 2*y1*y2 + y2**2)
@@ -667,10 +698,10 @@ class LineLineAngle(BaseConstraint):
         # ∂R/∂y4 = (-x3 + x4)/(x3**2 - 2*x3*x4 + x4**2 + y3**2 - 2*y3*y4 + y4**2)
 
         # Get points.
-        p1 = positions[self.line1.p1.id]
-        p2 = positions[self.line1.p2.id]
-        p3 = positions[self.line2.p1.id]
-        p4 = positions[self.line2.p2.id]
+        p1 = self.line1.p1.get_state(variable_values)
+        p2 = self.line1.p2.get_state(variable_values)
+        p3 = self.line2.p1.get_state(variable_values)
+        p4 = self.line2.p2.get_state(variable_values)
 
         # Get their components.
         x1, y1 = p1[0], p1[1]
@@ -751,13 +782,15 @@ class LineLineDistance(BaseConstraint):
     line2: Line
     distance: float
 
-    def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
         # Assumes lines are parallel, enforced by a LinesParallel constraint.
-        p0, p1 = positions[self.line1.p1.id], positions[self.line1.p2.id]
-        p2 = positions[self.line2.p1.id]
+        p1 = self.line1.p1.get_state(variable_values)
+        p2 = self.line1.p2.get_state(variable_values)
+        p3 = self.line2.p1.get_state(variable_values)
+        # p4 = self.line2.p2.get_state(variable_values)
 
-        v = p1 - p0
-        w = p2 - p0
+        v = p2 - p1
+        w = p3 - p1
 
         # Distance = |v x w| / |v|
         mag_v = nb.np.linalg.norm(v)
@@ -772,7 +805,7 @@ class LineLineDistance(BaseConstraint):
         )
 
     def get_jacobian_row_values(
-        self, positions: Mapping[str, ArrayLike]
+        self, variable_values: Mapping[str, float]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = (|v × w| / |v|) - d
         # ∂R/∂x1 = (-(x1 - x2)*((x1 - x2)*(y1 - yp) - (x1 - xp)*(y1 - y2)) + (y2 - yp)*((x1 - x2)**2 + (y1 - y2)**2))/((x1 - x2)**2 + (y1 - y2)**2)**(3/2)
@@ -783,9 +816,9 @@ class LineLineDistance(BaseConstraint):
         # ∂R/∂yp = (-x1 + x2)/sqrt((x1 - x2)**2 + (y1 - y2)**2)
 
         # Get points.
-        p1 = positions[self.line1.p1.id]
-        p2 = positions[self.line1.p2.id]
-        pp = positions[self.line2.p1.id]  # This is the point on the second line.
+        p1 = self.line1.p1.get_state(variable_values)
+        p2 = self.line1.p2.get_state(variable_values)
+        pp = self.line2.p1.get_state(variable_values)
 
         # Get their components.
         x1, y1 = p1[0], p1[1]

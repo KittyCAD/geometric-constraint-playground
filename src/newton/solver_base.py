@@ -340,17 +340,11 @@ class Solver2D(ABC):
     ) -> None:
         # Assess the quality of the result using the final variable map.
 
-        # Build the legacy 'positions' dictionary that get_residual expects.
-        positions: Dict[str, np.ndarray] = {}
-        for p in self.primitives:
-            if isinstance(p, Point):
-                x = final_variable_values.get(f"{p.id}_x", p.x)
-                y = final_variable_values.get(f"{p.id}_y", p.y)
-                positions[p.id] = np.array([x, y])
-
         # Recalculate residuals using only the geometric constraints that were solved.
         # This ignores the regularization terms included in `result.fun`.
-        constraint_residuals = [c.get_residual(positions) for c in constraints_solved]
+        constraint_residuals = [
+            c.get_residual(final_variable_values) for c in constraints_solved
+        ]
         constraint_errors = [np.max(np.abs(r)) for r in constraint_residuals]
         geometric_residuals = np.concatenate(constraint_residuals)
         max_error = np.max(np.abs(geometric_residuals))
