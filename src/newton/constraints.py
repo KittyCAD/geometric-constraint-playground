@@ -18,13 +18,14 @@ class BaseConstraint(ABC):
         pass
 
     @abstractmethod
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:
         # This method is used to calculate (part of) a row of the Jacobian matrix.
         pass
 
-    def get_residual_dim(self) -> int:
+    @property
+    def n_residual_rows(self) -> int:
         return 1
 
     @abstractmethod
@@ -40,13 +41,14 @@ class PointFixed(BaseConstraint):
     def __post_init__(self):
         self.fixed_pos = nb.np.array([self.point.x, self.point.y])
 
-    def get_residual_dim(self) -> int:
+    @property
+    def n_residual_rows(self) -> int:
         return 2
 
     def get_residual(self, positions: Mapping[str, ArrayLike]) -> ArrayLike:
         return positions[self.point.id] - self.fixed_pos
 
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:
         # Residuals: R1 = px - fx, R2 = py - fy
@@ -61,7 +63,7 @@ class PointFixed(BaseConstraint):
         # dr2_dx = 0.0
         dr2_dy = 1.0
 
-        # Indices for the residuals. This is a 2D constraint, so we have two residuals. Basically all other constraints will have 1 residual.
+        # Row indices for the residuals. This is a 2D constraint, so we have two residuals. Basically all other constraints will have 1 residual.
         i_x = 0
         i_y = 1
 
@@ -88,7 +90,7 @@ class PointPointEuclideanDistance(BaseConstraint):
         current_dist = nb.np.linalg.norm(pos1 - pos2)
         return nb.np.array([current_dist - self.distance])
 
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = sqrt((x1-x2)**2 + (y1-y2)**2) - d
@@ -155,7 +157,7 @@ class PointPointXDistance(BaseConstraint):
         p2_pos = positions[self.p2.id]
         return nb.np.array([abs(p1_pos[0] - p2_pos[0]) - self.distance])
 
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:  #
         # Residual: R = |x1 - x2| - d
@@ -211,7 +213,7 @@ class PointPointYDistance(BaseConstraint):
         p2_pos = positions[self.p2.id]
         return nb.np.array([abs(p1_pos[1] - p2_pos[1]) - self.distance])
 
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = |y1 - y2| - d
@@ -267,14 +269,14 @@ class LineLength(BaseConstraint):
         current_dist = nb.np.linalg.norm(pos1 - pos2)
         return nb.np.array([current_dist - self.length])
 
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:
         # Reuse the implementation from PointPointEuclideanDistance.
         temp_constraint = PointPointEuclideanDistance(
             p1=self.line.p1, p2=self.line.p2, distance=self.length
         )
-        return temp_constraint.get_jacobian_section(positions)
+        return temp_constraint.get_jacobian_row_values(positions)
 
     def get_involved_primitive_ids(self) -> frozenset:
         return frozenset(self.line.get_involved_primitive_ids())
@@ -289,7 +291,7 @@ class LineHorizontal(BaseConstraint):
         p2_pos = positions[self.line.p2.id]
         return nb.np.array([p1_pos[1] - p2_pos[1]])
 
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = y1 - y2
@@ -324,7 +326,7 @@ class LineVertical(BaseConstraint):
         p2_pos = positions[self.line.p2.id]
         return nb.np.array([p1_pos[0] - p2_pos[0]])
 
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = x1 - x2
@@ -360,7 +362,7 @@ class LinesParallel(BaseConstraint):
         v2 = positions[self.line2.p2.id] - positions[self.line2.p1.id]
         return nb.np.array([v1[0] * v2[1] - v1[1] * v2[0]])
 
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = (x2-x1)*(y4-y3) - (y2-y1)*(x4-x3)
@@ -446,7 +448,7 @@ class LinesPerpendicular(BaseConstraint):
         v2 = positions[self.line2.p2.id] - positions[self.line2.p1.id]
         return nb.np.array([v1[0] * v2[0] + v1[1] * v2[1]])
 
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = (x2-x1)*(x4-x3) + (y2-y1)*(y4-y3)
@@ -536,7 +538,7 @@ class LinesEqualLength(BaseConstraint):
 
         return nb.np.array([len1 - len2])
 
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = |L1| - |L2|
@@ -651,7 +653,7 @@ class LineLineAngle(BaseConstraint):
         # Return 0.0 if invalid, otherwise return residual.
         return nb.np.where(is_invalid, nb.np.array([0.0]), angle_residual)
 
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = atan2(v1×v2, v1·v2) - α
@@ -769,7 +771,7 @@ class LineLineDistance(BaseConstraint):
             is_valid, nb.np.array([current_dist - self.distance]), nb.np.array([0.0])
         )
 
-    def get_jacobian_section(
+    def get_jacobian_row_values(
         self, positions: Mapping[str, ArrayLike]
     ) -> List[Tuple[str, float, int]]:
         # Residual: R = (|v × w| / |v|) - d
