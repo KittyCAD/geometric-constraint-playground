@@ -346,7 +346,7 @@ def constrain_tangent_circle_to_line():
     # Define the constraints.
     constraints = [
         PointFixed(point=p0),
-        PointPointCoincident(p0, p1),  # Ensure P1 and P2 are coincident.
+        PointPointCoincident(p0, p1),
         LineHorizontal(line=line),
         CircleRadius(circle=circle, radius=2.0),
         PointPointXDistance(p1, center, distance=2.0),
