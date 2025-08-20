@@ -135,8 +135,9 @@ class CircularArc(Primitive):
     def build_definitional_constraints(self) -> List[Constraint]:
         # A circular arc is defined by its centre and its endpoints, but we need those
         # endpoints to be the same distance from the centre, i.e., constant radius.
+        from newton.constraints import PointsEquidistant
 
-        return []
+        return [PointsEquidistant(center=self.center, p1=self.start, p2=self.end)]
 
     def get_initial_variable_values(self) -> Dict[str, float]:
         # A CircularArc owns no variables, only its constituent points do.

@@ -1084,20 +1084,101 @@ class LineTangentToCircle(BaseConstraint):
         )
 
 
+@dataclass
+class PointsEquidistant(BaseConstraint):
+    """
+    Constrains two points, p1 and p2, to be the same distance from a third
+    point, center. This is the key definitional constraint for a circular arc.
+    """
+
+    center: Point
+    p1: Point
+    p2: Point
+
+    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+        # Get the current position of all three points.
+        center_pos = self.center.get_state(variable_values)
+        p1_pos = self.p1.get_state(variable_values)
+        p2_pos = self.p2.get_state(variable_values)
+
+        # For numerical stability and simpler derivatives, we compare the squared
+        # distances. The residual is zero if the distances are equal.
+        # R = distance(center, p1)² - distance(center, p2)²
+        dist1_sq = (p1_pos[0] - center_pos[0]) ** 2 + (p1_pos[1] - center_pos[1]) ** 2
+        dist2_sq = (p2_pos[0] - center_pos[0]) ** 2 + (p2_pos[1] - center_pos[1]) ** 2
+
+        return nb.np.array([dist1_sq - dist2_sq])
+
+    def get_jacobian_row_values(
+        self, variable_values: Mapping[str, float]
+    ) -> List[Tuple[str, float, int]]:
+        # Residual: R = (x1-xc)²+(y1-yc)² - (x2-xc)²-(y2-yc)²
+        # The partial derivatives are:
+        # ∂R/∂x1 = 2*(x1-xc)
+        # ∂R/∂y1 = 2*(y1-yc)
+        # ∂R/∂x2 = -2*(x2-xc)
+        # ∂R/∂y2 = -2*(y2-yc)
+        # ∂R/∂xc = 2*(x2-x1)
+        # ∂R/∂yc = 2*(y2-y1)
+
+        center_pos = self.center.get_state(variable_values)
+        p1_pos = self.p1.get_state(variable_values)
+        p2_pos = self.p2.get_state(variable_values)
+
+        xc, yc = center_pos
+        x1, y1 = p1_pos
+        x2, y2 = p2_pos
+
+        # Calculate derivative values.
+        dr_dx1 = 2 * (x1 - xc)
+        dr_dy1 = 2 * (y1 - yc)
+        dr_dx2 = -2 * (x2 - xc)
+        dr_dy2 = -2 * (y2 - yc)
+        dr_dxc = 2 * (x2 - x1)
+        dr_dyc = 2 * (y2 - y1)
+
+        # Get the variable IDs to build the Jacobian row entries.
+        center_vars = self.center.get_variable_ids()
+        p1_vars = self.p1.get_variable_ids()
+        p2_vars = self.p2.get_variable_ids()
+
+        # This constraint has a single residual, so the local row index is always 0.
+        i_residual = 0
+
+        return [
+            (p1_vars[0], float(dr_dx1), i_residual),
+            (p1_vars[1], float(dr_dy1), i_residual),
+            (p2_vars[0], float(dr_dx2), i_residual),
+            (p2_vars[1], float(dr_dy2), i_residual),
+            (center_vars[0], float(dr_dxc), i_residual),
+            (center_vars[1], float(dr_dyc), i_residual),
+        ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        # This constraint involves all three points.
+        return frozenset(
+            self.center.get_involved_primitive_ids().union(
+                self.p1.get_involved_primitive_ids(),
+                self.p2.get_involved_primitive_ids(),
+            )
+        )
+
+
 Constraint = Union[
+    CircleRadius,
+    LineHorizontal,
+    LineLength,
+    LineLineAngle,
+    LineLineDistance,
+    LinesEqualLength,
+    LinesParallel,
+    LinesPerpendicular,
+    LineTangentToCircle,
+    LineVertical,
     PointFixed,
     PointPointCoincident,
     PointPointEuclideanDistance,
     PointPointXDistance,
     PointPointYDistance,
-    LineLength,
-    LinesParallel,
-    LinesPerpendicular,
-    LineLineAngle,
-    LineHorizontal,
-    LineVertical,
-    LinesEqualLength,
-    LineLineDistance,
-    CircleRadius,
-    LineTangentToCircle,
+    PointsEquidistant,
 ]

@@ -2,6 +2,8 @@ import logging
 import random
 
 import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.patches import Arc
 from matplotlib.patches import Circle as CirclePatch
 from pyinstrument import Profiler
 
@@ -21,7 +23,7 @@ from newton.constraints import (
     PointPointYDistance,
 )
 from newton.logging_config import configure_logging, logger
-from newton.primitives import Circle, Line, Point, Primitive
+from newton.primitives import Circle, CircularArc, Line, Point, Primitive
 from newton.solver_dense import Solver2DDense
 from newton.solver_sparse import Solver2DSparse
 
@@ -77,6 +79,42 @@ def draw_circle(circle: Circle, color: str, label: str | None = None):
     ax.add_patch(circle_patch)
 
 
+def draw_arc(arc: CircularArc, color: str, label: str | None = None):
+    center_pos = (arc.center.x, arc.center.y)
+
+    # Calculate radius from center to start point
+    radius = np.sqrt(
+        (arc.start.x - arc.center.x) ** 2 + (arc.start.y - arc.center.y) ** 2
+    )
+
+    # Calculate angles in degrees
+    start_angle = np.degrees(
+        np.arctan2(arc.start.y - arc.center.y, arc.start.x - arc.center.x)
+    )
+    end_angle = np.degrees(
+        np.arctan2(arc.end.y - arc.center.y, arc.end.x - arc.center.x)
+    )
+
+    # Calculate arc span
+    angle_span = end_angle - start_angle
+    if angle_span < 0:
+        angle_span += 360
+
+    arc_patch = Arc(
+        center_pos,
+        2 * radius,
+        2 * radius,  # width, height
+        theta1=start_angle,
+        theta2=end_angle,
+        color=color,
+        linewidth=1.5,
+        label=label,
+    )
+
+    ax = plt.gca()
+    ax.add_patch(arc_patch)
+
+
 def plot_geometry(
     primitives: list[Primitive], color: str, label: str, prime: bool = False
 ):
@@ -92,6 +130,8 @@ def plot_geometry(
             circle_label = label if not has_labeled_circle else None
             draw_circle(prim, color=color, label=circle_label)
             has_labeled_circle = True
+        elif isinstance(prim, CircularArc):
+            draw_arc(prim, color=color, label=label)
         elif isinstance(prim, Point):
             # Points are drawn by themselves after lines/circles to be on top.
             pass
@@ -375,6 +415,50 @@ def constrain_tangent_circle_to_line():
         plt.show()
 
 
+def constrain_simple_arc():
+    # Define the primitives with an intentionally "wrong" initial configuration
+    center = Point(x=0.0, y=0.0, id="A1_C")
+    start = Point(x=0.0, y=3.0, id="A1_S")
+    end = Point(x=3.0, y=0.0, id="A1_E")
+
+    # The arc connects start and end points around the center
+    # Initially, the end point is at a different distance from center than start
+    arc = CircularArc(center=center, start=start, end=end, id="A1")
+
+    all_primitives = [center, start, end, arc]
+
+    # Define the constraints that will force the arc to change
+    r_new = 2.0
+    constraints = [
+        PointFixed(point=center),
+        PointPointYDistance(arc.center, arc.start, distance=r_new),
+        PointPointXDistance(arc.center, arc.end, distance=0),
+        PointPointYDistance(arc.start, arc.end, distance=r_new * 2),
+    ]
+
+    # Plot initial state.
+    if PLOT:
+        plt.figure(figsize=(10, 8))
+        plot_geometry(all_primitives, color="red", label="Initial", prime=False)
+
+    # Pass them to the solver. The solver handles the rest automatically!
+    Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
+    solver = Solver2D(all_primitives, constraints)
+    solver.solve()
+
+    # Plot final state.
+    if PLOT:
+        plot_geometry(all_primitives, color="blue", label="Solved", prime=True)
+
+        plt.legend()
+        plt.title("Arc Constraint")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.axis("equal")
+        plt.grid(True, alpha=0.3)
+        plt.show()
+
+
 def test_determinism():
     n_passed = 0
     n_failed = 0
@@ -393,11 +477,12 @@ if __name__ == "__main__":
     profiler = Profiler()
     profiler.start()
 
-    constrain_rectangles()
-    constrain_parallel_offset()
-    constrain_underdetermined()
-    constrain_simple_circle()
-    constrain_tangent_circle_to_line()
+    # constrain_rectangles()
+    # constrain_parallel_offset()
+    # constrain_underdetermined()
+    # constrain_simple_circle()
+    # constrain_tangent_circle_to_line()
+    constrain_simple_arc()
 
     profiler.stop()
     profiler.print()
