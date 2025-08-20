@@ -36,9 +36,16 @@ if logger.isEnabledFor(logging.DEBUG):
 
 class Solver2D(ABC):
     def __init__(self, primitives: List[Primitive], constraints: List[Constraint]):
+        # Build our full set of constraints: this will be the user-defined constraints
+        # passed in, plus our definitional constraints from the primitives.
+        all_constraints = list(constraints)
+        for p in primitives:
+            all_constraints.extend(p.build_definitional_constraints())
+
+        # Store the primitives and constraints.
         self.primitives = primitives
         self.primitive_map = {p.id: p for p in primitives}
-        self.constraints: List[Constraint] = constraints
+        self.constraints: List[Constraint] = all_constraints
         self.free_primitives = self.identify_free_primitives()
 
         self.module: ModuleType = (
