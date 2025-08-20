@@ -97,16 +97,15 @@ class Circle(Primitive):
         return {f"{self.id}_radius": self.radius}
 
     def get_state(self, variable_values: Mapping[str, float]) -> nb.Vector:
-        # State is the center coordinates and radius.
-        var_ids = self.get_variable_ids()
-        center_x = variable_values[var_ids[0]]
-        center_y = variable_values[var_ids[1]]
-        radius = variable_values[var_ids[2]]
+        # Get centre from the centre point, radius from our own variable.
+        p_center = self.center.get_state(variable_values)
+        radius_var_id = f"{self.id}_radius"
+        radius = variable_values[radius_var_id]
 
-        return nb.np.array([center_x, center_y, radius])
+        return nb.np.array([p_center[0], p_center[1], radius])
 
     def get_variable_ids(self) -> List[str]:
-        return [f"{self.center.id}_x", f"{self.center.id}_y", f"{self.id}_radius"]
+        return [f"{self.id}_radius"]
 
     def get_involved_primitive_ids(self) -> Set[str]:
         return {self.id, self.center.id}

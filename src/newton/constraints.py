@@ -955,8 +955,8 @@ class CircleRadius(BaseConstraint):
     def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
         # We don't need get_state, as we only care about the radius variable.
 
-        # Ask the circle for the ID of its radius variable; the third var.
-        radius_var_id = self.circle.get_variable_ids()[2]
+        # Ask the circle for the ID of its radius variable.
+        radius_var_id = self.circle.get_variable_ids()[0]
 
         # Look up the current value of the radius in the map.
         current_radius = variable_values[radius_var_id]
@@ -968,7 +968,7 @@ class CircleRadius(BaseConstraint):
     ) -> List[Tuple[str, float, int]]:
         # The residual is R = r_current - r_target.
         # The only partial derivative that is non-zero is ∂R/∂r_current, which is 1.
-        radius_var_id = self.circle.get_variable_ids()[2]
+        radius_var_id = self.circle.get_variable_ids()[0]
 
         # This constraint has a scalar residual.
         i_residual = 0
@@ -1062,16 +1062,17 @@ class LineTangentToCircle(BaseConstraint):
 
         p1_vars = self.line.p1.get_variable_ids()
         p2_vars = self.line.p2.get_variable_ids()
-        circle_vars = self.circle.get_variable_ids()
+        center_vars = self.circle.center.get_variable_ids()  # Get from centre point.
+        radius_var = self.circle.get_variable_ids()[0]  # Radius is the only variable.
 
         return [
             (p1_vars[0], float(dr_dx1), 0),
             (p1_vars[1], float(dr_dy1), 0),
             (p2_vars[0], float(dr_dx2), 0),
             (p2_vars[1], float(dr_dy2), 0),
-            (circle_vars[0], float(dr_dxc), 0),
-            (circle_vars[1], float(dr_dyc), 0),
-            (circle_vars[2], float(dr_dr), 0),
+            (center_vars[0], float(dr_dxc), 0),
+            (center_vars[1], float(dr_dyc), 0),
+            (radius_var, float(dr_dr), 0),
         ]
 
     def get_involved_primitive_ids(self) -> frozenset:

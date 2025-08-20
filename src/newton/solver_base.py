@@ -294,47 +294,37 @@ class Solver2D(ABC):
         free_primitives: List[Primitive],
         substitution_map: Dict[str, str],
     ) -> Dict[str, float]:
-        # Create a map of the variables that were actually solved for.
-        final_vars = result.x
-        free_var_ids = [
-            v
+        # Start with the initial state of all variables in the system.
+        final_variable_values: Dict[str, float] = {}
+        for p in self.primitives:
+            final_variable_values.update(p.get_initial_variable_values())
+
+        # Get the variables that were actually part of the numerical solve.
+        solved_var_ids = [
+            var_id
             for p in free_primitives
-            for v in p.get_variable_ids()
-            if v not in substitution_map
+            for var_id in p.get_variable_ids()
+            if var_id not in substitution_map
         ]
 
-        # Deduplicate variable IDs.
-        # TODO: Not happy with deduplicating here...
-        free_var_ids = list(dict.fromkeys(free_var_ids))
+        # TODO: Maybe we don't need this?
+        solved_var_ids = list(dict.fromkeys(solved_var_ids))  # Deduplicate.
 
-        solved_values = {var_id: final_vars[i] for i, var_id in enumerate(free_var_ids)}
+        # Create a map of the new, solved values.
+        solved_values = {var_id: result.x[i] for i, var_id in enumerate(solved_var_ids)}
 
-        # Now, build the complete map for all variables.
-        final_variable_values: Dict[str, float] = {}
-        all_vars = [v for p in self.primitives for v in p.get_variable_ids()]
+        # Update the full map with the solved values.
+        final_variable_values.update(solved_values)
+
+        # Handle any symbolic substitutions to ensure all variables are consistent.
+        # (This part handles cases where, e.g., P2.x was substituted by P1.x)
+        all_vars_with_dupes = [v for p in self.primitives for v in p.get_variable_ids()]
+        all_vars = list(dict.fromkeys(all_vars_with_dupes))
 
         for var_id in all_vars:
-            # Find the root representative for this variable.
             root = find(var_id, substitution_map)
-
-            # The final value is either from the solved set, or it's the initial
-            # value of the primitive that owns the root variable.
-            if root in solved_values:
-                final_variable_values[var_id] = solved_values[root]
-            else:
-                # This variable was substituted by a variable that was constant.
-                # Find its original value.
-                # TODO: This underscore stuff is _nasty_.
-                root_prim_id = root.split("_")[0]
-                root_var_type = root.split("_")[1]
-                root_prim = self.primitive_map[root_prim_id]
-
-                # This part remains coupled for now.
-                if isinstance(root_prim, Point):
-                    if root_var_type == "x":
-                        final_variable_values[var_id] = root_prim.x
-                    elif root_var_type == "y":
-                        final_variable_values[var_id] = root_prim.y
+            if root in final_variable_values:
+                final_variable_values[var_id] = final_variable_values[root]
 
         return final_variable_values
 
@@ -384,9 +374,8 @@ class Solver2D(ABC):
                 p.y = final_variable_values.get(f"{p.id}_y", p.y)
 
             elif isinstance(p, Circle):
-                # The circle primitive is responsible for its radius.
-                # We know the variable IDs are [center_x, center_y, radius] so third.
-                radius_var_id = p.get_variable_ids()[2]
+                # The circle primitive is responsible for its radius only.
+                radius_var_id = p.get_variable_ids()[0]
 
                 # Update the object's radius attribute with the solved value.
                 p.radius = final_variable_values.get(radius_var_id, p.radius)
