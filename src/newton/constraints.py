@@ -7,7 +7,7 @@ import numpy as np
 
 from newton import backend as nb
 from newton.constants import EPS
-from newton.primitives import Line, Point, Circle
+from newton.primitives import Line, Point, Circle, CircularArc
 
 ArrayLike = Union[np.ndarray, jnp.ndarray]
 
@@ -1164,7 +1164,61 @@ class PointsEquidistant(BaseConstraint):
         )
 
 
+@dataclass
+class ArcRadius(BaseConstraint):
+    arc: CircularArc
+    radius: float
+
+    @property
+    def n_residual_rows(self) -> int:
+        # We need two residuals: one for center to start distance, one for center to end distance.
+        return 2
+
+    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+        # Reuse existing implementation from PointPointEuclideanDistance.
+        center_to_start = PointPointEuclideanDistance(
+            self.arc.center, self.arc.start, self.radius
+        )
+        center_to_end = PointPointEuclideanDistance(
+            self.arc.center, self.arc.end, self.radius
+        )
+
+        r1 = center_to_start.get_residual(variable_values)
+        r2 = center_to_end.get_residual(variable_values)
+
+        return nb.np.array([r1[0], r2[0]])
+
+    def get_jacobian_row_values(
+        self, variable_values: Mapping[str, float]
+    ) -> List[Tuple[str, float, int]]:
+        # Reuse existing implementation from PointPointEuclideanDistance.
+        center_to_start = PointPointEuclideanDistance(
+            self.arc.center, self.arc.start, self.radius
+        )
+        center_to_end = PointPointEuclideanDistance(
+            self.arc.center, self.arc.end, self.radius
+        )
+
+        # Get Jacobian entries for both constraints.
+        start_entries = center_to_start.get_jacobian_row_values(variable_values)
+        end_entries = center_to_end.get_jacobian_row_values(variable_values)
+
+        # For start constraint entries, use residual row 0.
+        start_entries_with_row = [
+            (var_id, value, 0) for var_id, value, _ in start_entries
+        ]
+
+        # For end constraint entries, use residual row 1.
+        end_entries_with_row = [(var_id, value, 1) for var_id, value, _ in end_entries]
+
+        return start_entries_with_row + end_entries_with_row
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        return frozenset(self.arc.get_involved_primitive_ids())
+
+
 Constraint = Union[
+    ArcRadius,
     CircleRadius,
     LineHorizontal,
     LineLength,

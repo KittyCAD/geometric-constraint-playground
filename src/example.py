@@ -9,6 +9,7 @@ from pyinstrument import Profiler
 
 from newton.constants import CONFIG_USE_SPARSE_SOLVE
 from newton.constraints import (
+    ArcRadius,
     CircleRadius,
     LineHorizontal,
     LineLineDistance,
@@ -416,29 +417,26 @@ def constrain_tangent_circle_to_line():
 
 
 def constrain_simple_arc():
-    # Define the primitives with an intentionally "wrong" initial configuration
     center = Point(x=0.0, y=0.0, id="A1_C")
     start = Point(x=0.0, y=3.0, id="A1_S")
-    end = Point(x=3.0, y=0.0, id="A1_E")
+    end = Point(x=0.0, y=-3.0, id="A1_E")
 
-    # The arc connects start and end points around the center
-    # Initially, the end point is at a different distance from center than start
     arc = CircularArc(center=center, start=start, end=end, id="A1")
 
     all_primitives = [center, start, end, arc]
 
-    # Define the constraints that will force the arc to change
-    r_new = 2.0
+    # Define the constraints that will force the arc to change.
+    r = 2.0
     constraints = [
         PointFixed(point=center),
-        PointPointYDistance(arc.center, arc.start, distance=r_new),
-        PointPointXDistance(arc.center, arc.end, distance=0),
-        PointPointYDistance(arc.start, arc.end, distance=r_new * 2),
+        ArcRadius(arc=arc, radius=r),
+        PointPointXDistance(center, start, distance=0.0),
+        PointPointXDistance(center, end, distance=1.0),
     ]
 
     # Plot initial state.
     if PLOT:
-        plt.figure(figsize=(10, 8))
+        plt.figure(figsize=(8, 8))
         plot_geometry(all_primitives, color="red", label="Initial", prime=False)
 
     # Pass them to the solver. The solver handles the rest automatically!
