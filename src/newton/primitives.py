@@ -109,3 +109,30 @@ class Circle(Primitive):
 
     def get_involved_primitive_ids(self) -> Set[str]:
         return {self.id, self.center.id}
+
+
+@dataclass
+class CircularArc(Primitive):
+    # Circular arc defined by centre point and two endpoint points.
+    center: Point
+    start: Point
+    end: Point
+    id: str
+
+    def __post_init__(self):
+        super().__init__(self.id)
+
+    def get_initial_variable_values(self) -> Dict[str, float]:
+        # A CircularArc owns no variables, only its constituent points do.
+        return {}
+
+    def get_state(self, variable_values: Mapping[str, float]) -> nb.Vector:
+        # A circular arc has no independent state, only that of its points.
+        return nb.np.array([])
+
+    def get_variable_ids(self) -> List[str]:
+        # A circular arc introduces no new variables to the system, just use the points.
+        return []
+
+    def get_involved_primitive_ids(self) -> Set[str]:
+        return {self.id, self.center.id, self.start.id, self.end.id}
