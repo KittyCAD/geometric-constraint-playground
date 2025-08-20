@@ -5,7 +5,7 @@
 #   shapes.
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Mapping
 
 import jax
 import jax.numpy as jnp
@@ -15,9 +15,8 @@ from scipy.optimize import least_squares
 import newton.backend as nb
 from newton.constants import NONZERO_RANK_TOLERANCE, REGULARIZATION_LAMBDA
 from newton.constraints import Constraint
-from newton.exceptions import UnsupportedPrimitiveError
 from newton.logging_config import logger
-from newton.primitives import Point, Primitive
+from newton.primitives import Primitive
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 
@@ -53,70 +52,37 @@ class Solver2DDense(Solver2D):
         ]
 
         # Build the initial guess array based on this ordered list.
-        initial_values = []
-        prim_map = {p.id: p for p in self.primitives}
-        for var_id in free_var_ids:
-            prim_id, var_type = var_id.split("_")
-            p = prim_map[prim_id]
+        all_initial_values: Dict[str, float] = {}
+        for p in self.primitives:
+            all_initial_values.update(p.get_initial_variable_values())
 
-            # TODO: Handle other primitive types.
-            if isinstance(p, Point):
-                if var_type == "x":
-                    initial_values.append(p.x)
-                elif var_type == "y":
-                    initial_values.append(p.y)
-            else:
-                raise UnsupportedPrimitiveError(type(p).__name__)
-
-        initial_guess = np.array(initial_values)
+        # Build the initial guess array by looking up the free variables.
+        initial_guess = np.array(
+            [all_initial_values[var_id] for var_id in free_var_ids]
+        )
         jnp_initial_guess = jnp.asarray(initial_guess)
 
-        def build_inputs_for_constraints_jax(
-            free_vars: jnp.ndarray,
-        ) -> Dict[str, jnp.ndarray]:
-            # This function provides the `positions` dict that get_residual expects.
-
-            # Start with the initial state of all primitives.
-            # TODO: Handle other primitive types.
-            positions = {
-                p.id: jnp.array([p.x, p.y])
-                for p in self.primitives
-                if isinstance(p, Point)
-            }
-
-            if any(not isinstance(p, Point) for p in free_primitives):
-                raise NotImplementedError(
-                    "Only Point primitives are currently supported."
-                )
-
-            # Create a dictionary of the solved variable values.
+        def build_variable_values_map(
+            free_vars: jnp.ndarray, initial_values: Dict[str, float]
+        ) -> Mapping[str, Any]:
+            # The values in solved_vars are JAX tracers, which behave like floats
+            # during JIT compilation.
             solved_vars = {
                 var_id: free_vars[i] for i, var_id in enumerate(free_var_ids)
             }
 
-            # Overwrite the positions of free points with the new solved values.
-            # We group variables by primitive ID.
-            free_point_ids = {p.id for p in free_primitives if isinstance(p, Point)}
-            for pid in free_point_ids:
-                new_x = solved_vars.get(f"{pid}_x", positions[pid][0])
-                new_y = solved_vars.get(f"{pid}_y", positions[pid][1])
-                positions[pid] = jnp.array([new_x, new_y])
-
-            return positions
+            # Unpack the solved variables into the initial values map.
+            return {**initial_values, **solved_vars}
 
         def residuals_vector(free_vars: jnp.ndarray) -> jnp.ndarray:
-            positions = build_inputs_for_constraints_jax(free_vars)
+            variable_values = build_variable_values_map(free_vars, all_initial_values)
 
             constraint_residuals = jnp.concatenate(
-                [c.get_residual(positions) for c in constraints]
+                [c.get_residual(variable_values) for c in constraints]
             )
 
-            # Regularization residuals (lambda * (x - x_initial)).
             reg_residuals = REGULARIZATION_LAMBDA * (free_vars - jnp_initial_guess)
-
-            # Combine into the new augmented residual vector.
             residuals = jnp.concatenate([constraint_residuals, reg_residuals])
-
             return residuals
 
         jit_residuals = jax.jit(residuals_vector)

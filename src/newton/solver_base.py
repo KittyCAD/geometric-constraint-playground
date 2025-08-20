@@ -16,7 +16,7 @@ from newton.constraints import (
 )
 from newton.logging_config import logger
 from newton.matrix_utils import compute_rank
-from newton.primitives import Point, Primitive
+from newton.primitives import Circle, Point, Primitive
 from newton.symbolic_substitution import find, perform_symbolic_substitution
 
 SOLVE_VALIDATION_TOLERANCE = 1e-6  ## Our maximum allowed error on any constraint.
@@ -36,9 +36,16 @@ if logger.isEnabledFor(logging.DEBUG):
 
 class Solver2D(ABC):
     def __init__(self, primitives: List[Primitive], constraints: List[Constraint]):
+        # Build our full set of constraints: this will be the user-defined constraints
+        # passed in, plus our definitional constraints from the primitives.
+        all_constraints = list(constraints)
+        for p in primitives:
+            all_constraints.extend(p.build_definitional_constraints())
+
+        # Store the primitives and constraints.
         self.primitives = primitives
         self.primitive_map = {p.id: p for p in primitives}
-        self.constraints: List[Constraint] = constraints
+        self.constraints: List[Constraint] = all_constraints
         self.free_primitives = self.identify_free_primitives()
 
         self.module: ModuleType = (
@@ -294,42 +301,41 @@ class Solver2D(ABC):
         free_primitives: List[Primitive],
         substitution_map: Dict[str, str],
     ) -> Dict[str, float]:
-        # Create a map of the variables that were actually solved for.
-        final_vars = result.x
-        free_var_ids = [
-            v
-            for p in free_primitives
-            for v in p.get_variable_ids()
-            if v not in substitution_map
-        ]
-        solved_values = {var_id: final_vars[i] for i, var_id in enumerate(free_var_ids)}
-
-        # Now, build the complete map for all variables.
+        # Start with the initial state of all variables in the system.
         final_variable_values: Dict[str, float] = {}
-        all_vars = [v for p in self.primitives for v in p.get_variable_ids()]
+        for p in self.primitives:
+            final_variable_values.update(p.get_initial_variable_values())
+
+        # Get the variables that were actually part of the numerical solve.
+        solved_var_ids = [
+            var_id
+            for p in free_primitives
+            for var_id in p.get_variable_ids()
+            if var_id not in substitution_map
+        ]
+
+        # Duplicate check, but we shouldn't need this.
+        if len(solved_var_ids) != len(list(dict.fromkeys(solved_var_ids))):
+            raise ValueError(
+                "Duplicate variable IDs found in the solved variables. "
+                "This should not happen."
+            )
+
+        # Create a map of the new, solved values.
+        solved_values = {var_id: result.x[i] for i, var_id in enumerate(solved_var_ids)}
+
+        # Update the full map with the solved values.
+        final_variable_values.update(solved_values)
+
+        # Handle any symbolic substitutions to ensure all variables are consistent.
+        # (This part handles cases where, e.g., P2.x was substituted by P1.x)
+        all_vars_with_dupes = [v for p in self.primitives for v in p.get_variable_ids()]
+        all_vars = list(dict.fromkeys(all_vars_with_dupes))
 
         for var_id in all_vars:
-            # Find the root representative for this variable.
             root = find(var_id, substitution_map)
-
-            # The final value is either from the solved set, or it's the initial
-            # value of the primitive that owns the root variable.
-            if root in solved_values:
-                final_variable_values[var_id] = solved_values[root]
-            else:
-                # This variable was substituted by a variable that was constant.
-                # Find its original value.
-                # TODO: This underscore stuff is _nasty_.
-                root_prim_id = root.split("_")[0]
-                root_var_type = root.split("_")[1]
-                root_prim = self.primitive_map[root_prim_id]
-
-                # This part remains coupled for now.
-                if isinstance(root_prim, Point):
-                    if root_var_type == "x":
-                        final_variable_values[var_id] = root_prim.x
-                    elif root_var_type == "y":
-                        final_variable_values[var_id] = root_prim.y
+            if root in final_variable_values:
+                final_variable_values[var_id] = final_variable_values[root]
 
         return final_variable_values
 
@@ -340,17 +346,11 @@ class Solver2D(ABC):
     ) -> None:
         # Assess the quality of the result using the final variable map.
 
-        # Build the legacy 'positions' dictionary that get_residual expects.
-        positions: Dict[str, np.ndarray] = {}
-        for p in self.primitives:
-            if isinstance(p, Point):
-                x = final_variable_values.get(f"{p.id}_x", p.x)
-                y = final_variable_values.get(f"{p.id}_y", p.y)
-                positions[p.id] = np.array([x, y])
-
         # Recalculate residuals using only the geometric constraints that were solved.
         # This ignores the regularization terms included in `result.fun`.
-        constraint_residuals = [c.get_residual(positions) for c in constraints_solved]
+        constraint_residuals = [
+            c.get_residual(final_variable_values) for c in constraints_solved
+        ]
         constraint_errors = [np.max(np.abs(r)) for r in constraint_residuals]
         geometric_residuals = np.concatenate(constraint_residuals)
         max_error = np.max(np.abs(geometric_residuals))
@@ -380,10 +380,16 @@ class Solver2D(ABC):
         self, final_variable_values: Dict[str, float]
     ) -> None:
         for p in self.primitives:
-            # TODO: Handle other primitive types
             if isinstance(p, Point):
                 p.x = final_variable_values.get(f"{p.id}_x", p.x)
                 p.y = final_variable_values.get(f"{p.id}_y", p.y)
+
+            elif isinstance(p, Circle):
+                # The circle primitive is responsible for its radius only.
+                radius_var_id = p.get_variable_ids()[0]
+
+                # Update the object's radius attribute with the solved value.
+                p.radius = final_variable_values.get(radius_var_id, p.radius)
 
         logger.debug("Updated all primitives from final variable map.")
         return

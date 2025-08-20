@@ -1,9 +1,12 @@
 from enum import Enum, auto
+from typing import Union
 
 import jax.numpy as jnp
 import numpy
 
 np = numpy
+
+Vector = Union[numpy.ndarray, jnp.ndarray]
 
 
 class Backend(Enum):
