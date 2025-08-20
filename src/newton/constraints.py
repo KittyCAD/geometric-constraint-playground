@@ -82,6 +82,74 @@ class PointFixed(BaseConstraint):
 
 
 @dataclass
+class PointPointCoincident(BaseConstraint):
+    p1: Point
+    p2: Point
+
+    @property
+    def n_residual_rows(self) -> int:
+        # Two residual terms for this: one for delta x, one for delta y.
+        return 2
+
+    def get_residual(self, variable_values: Mapping[str, float]):
+        p1_pos = self.p1.get_state(variable_values)
+        p2_pos = self.p2.get_state(variable_values)
+
+        residual_x = p1_pos[0] - p2_pos[0]  # x1 - x2
+        residual_y = p1_pos[1] - p2_pos[1]  # y1 - y2
+
+        return nb.np.array([residual_x, residual_y])
+
+    def get_jacobian_row_values(
+        self, variable_values: Mapping[str, float]
+    ) -> List[Tuple[str, float, int]]:
+        # Residuals: R1 = x1 - x2, R2 = y1 - y2.
+        #
+        # For R1 = x1 - x2:
+        # ∂R1/∂x1 = 1
+        # ∂R1/∂y1 = 0
+        # ∂R1/∂x2 = -1
+        # ∂R1/∂y2 = 0
+        #
+        # For R2 = y1 - y2:
+        # ∂R2/∂x1 = 0
+        # ∂R2/∂y1 = 1
+        # ∂R2/∂x2 = 0
+        # ∂R2/∂y2 = -1
+
+        # Row indices for the two residuals.
+        i_x_residual = 0
+        i_y_residual = 1
+
+        # Get variable IDs for both points.
+        p1_vars = self.p1.get_variable_ids()
+        p2_vars = self.p2.get_variable_ids()
+
+        dr1_dx1 = 1.0
+        # dr1_dy1 = 0.0
+        dr1_dx2 = -1.0
+        # dr1_dy2 = 0.0
+
+        # dr2_dx1 = 0.0
+        dr2_dy1 = 1.0
+        # dr2_dx2 = 0.0
+        dr2_dy2 = -1.0
+
+        # We only care about nonzero derivs here.
+        return [
+            (p1_vars[0], dr1_dx1, i_x_residual),  # ∂R1/∂x1
+            (p2_vars[0], dr1_dx2, i_x_residual),  # ∂R1/∂x2
+            (p1_vars[1], dr2_dy1, i_y_residual),  # ∂R2/∂y1
+            (p2_vars[1], dr2_dy2, i_y_residual),  # ∂R2/∂y2
+        ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        ids_1 = self.p1.get_involved_primitive_ids()
+        ids_2 = self.p2.get_involved_primitive_ids()
+        return frozenset(ids_1.union(ids_2))
+
+
+@dataclass
 class PointPointEuclideanDistance(BaseConstraint):
     p1: Point
     p2: Point
@@ -1017,6 +1085,7 @@ class LineTangentToCircle(BaseConstraint):
 
 Constraint = Union[
     PointFixed,
+    PointPointCoincident,
     PointPointEuclideanDistance,
     PointPointXDistance,
     PointPointYDistance,

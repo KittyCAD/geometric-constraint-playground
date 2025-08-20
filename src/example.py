@@ -15,6 +15,7 @@ from newton.constraints import (
     LineTangentToCircle,
     LineVertical,
     PointFixed,
+    PointPointCoincident,
     PointPointEuclideanDistance,
     PointPointXDistance,
     PointPointYDistance,
@@ -331,6 +332,7 @@ def constrain_simple_circle():
 
 def constrain_tangent_circle_to_line():
     # Define the primitives.
+    p0 = Point(x=0.0, y=0.0, id="P0")
     p1 = Point(x=1.0, y=2.0, id="P1")
     p2 = Point(x=5.0, y=1.0, id="P2")
     line = Line(p1, p2, "L1")
@@ -339,11 +341,12 @@ def constrain_tangent_circle_to_line():
     center = Point(x=3.0, y=5.0, id="C1_P")
     circle = Circle(center=center, radius=1.0, id="C1")
 
-    all_primitives = [p1, p2, line, center, circle]
+    all_primitives = [p0, p1, p2, line, center, circle]
 
     # Define the constraints.
     constraints = [
-        PointFixed(point=p1),
+        PointFixed(point=p0),
+        PointPointCoincident(p0, p1),  # Ensure P1 and P2 are coincident.
         LineHorizontal(line=line),
         CircleRadius(circle=circle, radius=2.0),
         PointPointXDistance(p1, center, distance=2.0),
