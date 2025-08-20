@@ -307,8 +307,12 @@ class Solver2D(ABC):
             if var_id not in substitution_map
         ]
 
-        # TODO: Maybe we don't need this?
-        solved_var_ids = list(dict.fromkeys(solved_var_ids))  # Deduplicate.
+        # Duplicate check, but we shouldn't need this.
+        if len(solved_var_ids) != len(list(dict.fromkeys(solved_var_ids))):
+            raise ValueError(
+                "Duplicate variable IDs found in the solved variables. "
+                "This should not happen."
+            )
 
         # Create a map of the new, solved values.
         solved_values = {var_id: result.x[i] for i, var_id in enumerate(solved_var_ids)}
