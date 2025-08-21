@@ -475,11 +475,11 @@ if __name__ == "__main__":
     profiler = Profiler()
     profiler.start()
 
-    # constrain_rectangles()
-    # constrain_parallel_offset()
-    # constrain_underdetermined()
-    # constrain_simple_circle()
-    # constrain_tangent_circle_to_line()
+    constrain_rectangles()
+    constrain_parallel_offset()
+    constrain_underdetermined()
+    constrain_simple_circle()
+    constrain_tangent_circle_to_line()
     constrain_simple_arc()
 
     profiler.stop()

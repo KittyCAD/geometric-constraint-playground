@@ -1,15 +1,67 @@
+from dataclasses import dataclass
+from enum import Enum, auto
+from typing import Dict, List, Set
+
 from newton.constants import EPS
 from newton.constraints import (
     Constraint,
     LineHorizontal,
     LinesParallel,
     LineVertical,
+    PointPointCoincident,
     PointPointEuclideanDistance,
     PointPointXDistance,
     PointPointYDistance,
 )
 from newton.logging_config import logger
 from newton.primitives import Line, Point, Primitive
+
+
+class SubstitutionAction(Enum):
+    ELIMINATE = auto()  # Remove the constraint entirely.
+    SUBSTITUTE_AND_KEEP = auto()  # Apply substitutions but keep the constraint.
+    KEEP_UNCHANGED = auto()  # No substitutions apply, keep as-is.
+
+
+@dataclass
+class SubstitutionRule:
+    # Represents a variable substitution rule.
+    target_var: str  # Variable to be substituted.
+    replacement_var: str  # Variable to substitute with.
+    action: SubstitutionAction  # What to do with the constraint that created this rule.
+
+
+@dataclass
+class SubstitutionStats:
+    # Statistics about the substitution process for reporting.
+    def __init__(self):
+        self.variables_eliminated = 0
+        self.constraints_eliminated = 0
+        self.constraints_rewritten = 0
+        self.constraints_unchanged = 0
+        self.substitution_map_size = 0
+
+    def report(self):
+        # Log substitution statistics.
+        if self.substitution_map_size == 0:
+            logger.debug("No symbolic substitutions performed.")
+            return
+
+        logger.debug("Symbolic substitution results:")
+        logger.debug(f"  • {self.variables_eliminated} variables eliminated")
+        logger.debug(f"  • {self.constraints_eliminated} constraints eliminated")
+        logger.debug(f"  • {self.constraints_rewritten} constraints rewritten")
+        logger.debug(f"  • {self.constraints_unchanged} constraints unchanged")
+
+
+@dataclass
+class SubstitutionResults:
+    # Results from the substitution process.
+    active_constraints: List[Constraint]
+    substitution_map: Dict[str, str]
+    constraints_eliminated: int
+    constraints_rewritten: int
+    constraints_unchanged: int
 
 
 def find(var_id: str, parent_map: dict[str, str]) -> str:
@@ -122,78 +174,188 @@ def rewrite_constraint(
     return c
 
 
-def perform_symbolic_substitution(
-    constraints: list[Constraint], primitives: list[Primitive]
-) -> tuple[list[Constraint], dict[str, str]]:
+class SymbolicSubstitution:
     """
-    Performs a symbolic substitution pass on a constraint system.
-
-    This function finds simple equality constraints (e.g., two points being coincident)
-    and uses them to eliminate variables from the system. It does this by
-    rewriting the remaining constraints to use a single surrogate variable
-    for each set of equivalent variables.
-
-    Returns: (simplified_constraints, point_id_mapping)
-    where point_id_mapping maps original_point_id -> simplified_point_id
+    Handles symbolic substitution with clear separation between:
+    1. Rule discovery (which constraints create substitution rules).
+    2. Rule application (how to apply rules to other constraints).
+    3. Constraint filtering (which constraints to keep/eliminate).
     """
-    primitive_map = {p.id: p for p in primitives}
 
-    # https://www.geeksforgeeks.org/dsa/introduction-to-disjoint-set-data-structure-or-union-find-algorithm/
-    parent_map: dict[str, str] = {}
-    substitution_map: dict[str, str] = {}
-    constraints_to_skip: set[int] = set()
+    def __init__(self):
+        self.parent_map: dict[str, str] = {}
+        self.substitution_rules: List[SubstitutionRule] = []
+        self.constraints_to_eliminate: Set[int] = set()
+        self.constraints_rewritten_count = 0
 
-    # Build the equivalence sets using 'Union-Find'.
-    for i, c in enumerate(constraints):
-        match c:
-            case PointPointEuclideanDistance() if c.distance < EPS:
-                # All variables of p1 and p2 become equivalent.
-                for v1, v2 in zip(c.p1.get_variable_ids(), c.p2.get_variable_ids()):
-                    union(v1, v2, parent_map)
-                constraints_to_skip.add(i)
+    def analyze_constraint(
+        self, constraint: Constraint, index: int
+    ) -> List[SubstitutionRule]:
+        """
+        Analyse a single constraint to extract substitution rules.
+        Returns list of rules this constraint creates.
+        """
+        rules = []
 
-            case PointPointXDistance() if c.distance < EPS:
-                # Only the 'x' variables become equivalent.
-                p1_x_var = c.p1.get_variable_ids()[0]
-                p2_x_var = c.p2.get_variable_ids()[0]
-                union(p1_x_var, p2_x_var, parent_map)
-                constraints_to_skip.add(i)
+        match constraint:
+            # Pure equality constraints: can be used for substitution and then skipped.
+            # --------------------------------------------------------------------------
+            case PointPointCoincident():
+                for v1, v2 in zip(
+                    constraint.p1.get_variable_ids(), constraint.p2.get_variable_ids()
+                ):
+                    rules.append(SubstitutionRule(v1, v2, SubstitutionAction.ELIMINATE))
 
-            case PointPointYDistance() if c.distance < EPS:
-                # Only the 'y' variables become equivalent.
-                p1_y_var = c.p1.get_variable_ids()[1]
-                p2_y_var = c.p2.get_variable_ids()[1]
-                union(p1_y_var, p2_y_var, parent_map)
-                constraints_to_skip.add(i)
+                self.constraints_to_eliminate.add(index)
+
+            case PointPointEuclideanDistance() if constraint.distance < EPS:
+                for v1, v2 in zip(
+                    constraint.p1.get_variable_ids(), constraint.p2.get_variable_ids()
+                ):
+                    rules.append(SubstitutionRule(v1, v2, SubstitutionAction.ELIMINATE))
+
+                self.constraints_to_eliminate.add(index)
+
+            # Partial equality constraints: use for substitution, but do not skip, because:
+            # - They only establish equality for some coordinates, not all.
+            # - The solver still needs the constraint equation to enforce the relationship.
+            # - They represent geometric conditions that must be maintained even after substitution.
+            # --------------------------------------------------------------------------
+            case PointPointXDistance() if constraint.distance < EPS:
+                p1_x_var = constraint.p1.get_variable_ids()[0]
+                p2_x_var = constraint.p2.get_variable_ids()[0]
+                rules.append(
+                    SubstitutionRule(
+                        p1_x_var, p2_x_var, SubstitutionAction.SUBSTITUTE_AND_KEEP
+                    )
+                )
+                # Don't skip.
+
+            case PointPointYDistance() if constraint.distance < EPS:
+                p1_y_var = constraint.p1.get_variable_ids()[1]
+                p2_y_var = constraint.p2.get_variable_ids()[1]
+                rules.append(
+                    SubstitutionRule(
+                        p1_y_var, p2_y_var, SubstitutionAction.SUBSTITUTE_AND_KEEP
+                    )
+                )
+                # Don't skip.
+
+            case LineHorizontal():
+                p1_y_var = constraint.line.p1.get_variable_ids()[1]
+                p2_y_var = constraint.line.p2.get_variable_ids()[1]
+                rules.append(
+                    SubstitutionRule(
+                        p1_y_var, p2_y_var, SubstitutionAction.SUBSTITUTE_AND_KEEP
+                    )
+                )
+                # Don't skip.
+
+            case LineVertical():
+                p1_x_var = constraint.line.p1.get_variable_ids()[0]
+                p2_x_var = constraint.line.p2.get_variable_ids()[0]
+                rules.append(
+                    SubstitutionRule(
+                        p1_x_var, p2_x_var, SubstitutionAction.SUBSTITUTE_AND_KEEP
+                    )
+                )
+                # Don't skip.
 
         # TODO: Handle other constraint types.
 
-    # Now build the substitution map at the variable level.
+        return rules
 
-    # Get all variables from all primitives.
-    all_var_ids = {
-        var_id for p in primitive_map.values() for var_id in p.get_variable_ids()
-    }
+    def build_substitution_map(
+        self, constraints: List[Constraint], primitives: List[Primitive]
+    ) -> Dict[str, str]:
+        """
+        Build the final substitution map using union-find.
+        Returns mapping from variable_id -> canonical_variable_id.
+        """
+        # Extract all substitution rules.
+        for i, constraint in enumerate(constraints):
+            rules = self.analyze_constraint(constraint, i)
+            self.substitution_rules.extend(rules)
 
-    # For each variable, find its ultimate root/representative.
-    for var_id in all_var_ids:
-        root = find(var_id, parent_map)
-        if root != var_id:
-            substitution_map[var_id] = root
+        # Build union-find structure using the original union/find functions
+        # https://www.geeksforgeeks.org/dsa/introduction-to-disjoint-set-data-structure-or-union-find-algorithm/
+        for rule in self.substitution_rules:
+            union(rule.target_var, rule.replacement_var, self.parent_map)
 
-    if not substitution_map:
-        logger.info("No substitutions found. Returning original constraints.")
-        return constraints, {}
+        # Build final substitution map
+        all_variables = self._get_all_variables(primitives)
+        substitution_map = {}
 
-    logger.info(f"Found {len(substitution_map)} variable substitutions to perform.")
-    logger.debug(f"Substitution map: {substitution_map}")
+        # Now build the substitution map at the variable level.
+        # For each variable, find its ultimate root/representative.
+        for var_id in all_variables:
+            root = find(var_id, self.parent_map)
+            if root != var_id:
+                substitution_map[var_id] = root
 
-    # Rewrite the constraint list using the new primitive set.
-    simplified_constraints: list[Constraint] = []
-    for i, c in enumerate(constraints):
-        if i in constraints_to_skip:
-            continue
-        new_c = rewrite_constraint(c, parent_map, primitive_map)
-        simplified_constraints.append(new_c)
+        return substitution_map
 
-    return simplified_constraints, substitution_map
+    def apply_substitutions(
+        self, constraints: List[Constraint], primitives: List[Primitive]
+    ) -> SubstitutionResults:
+        # Apply symbolic substitution and return nice, structured results.
+        original_constraint_count = len(constraints)
+        substitution_map = self.build_substitution_map(constraints, primitives)
+
+        if not substitution_map:
+            logger.info("No substitutions found. Returning original constraints.")
+            return SubstitutionResults(
+                active_constraints=constraints,
+                substitution_map={},
+                constraints_eliminated=0,
+                constraints_rewritten=0,
+                constraints_unchanged=len(constraints),
+            )
+
+        logger.info(f"Found {len(substitution_map)} variable substitutions to perform.")
+        logger.debug(f"Substitution map: {substitution_map}")
+
+        # Rewrite the constraint list using the new primitive set.
+        simplified_constraints: list[Constraint] = []
+        primitive_map = {p.id: p for p in primitives}
+
+        for i, constraint in enumerate(constraints):
+            if i in self.constraints_to_eliminate:
+                logger.debug(f"Eliminating constraint {i}: {type(constraint).__name__}")
+                continue
+
+            # Apply substitutions to this constraint.
+            new_constraint = rewrite_constraint(
+                constraint, self.parent_map, primitive_map
+            )
+            simplified_constraints.append(new_constraint)
+
+            # Track if this constraint was actually rewritten.
+            if new_constraint is not constraint:
+                self.constraints_rewritten_count += 1
+
+        constraints_eliminated = original_constraint_count - len(simplified_constraints)
+        constraints_unchanged = (
+            len(simplified_constraints) - self.constraints_rewritten_count
+        )
+
+        return SubstitutionResults(
+            active_constraints=simplified_constraints,
+            substitution_map=substitution_map,
+            constraints_eliminated=constraints_eliminated,
+            constraints_rewritten=self.constraints_rewritten_count,
+            constraints_unchanged=constraints_unchanged,
+        )
+
+    def _get_all_variables(self, primitives: List[Primitive]) -> Set[str]:
+        # Get all variables from all primitives.
+        all_var_ids = {var_id for p in primitives for var_id in p.get_variable_ids()}
+        return all_var_ids
+
+
+def perform_symbolic_substitution(
+    constraints: list[Constraint], primitives: list[Primitive]
+) -> SubstitutionResults:
+    substitution = SymbolicSubstitution()
+    result = substitution.apply_substitutions(constraints, primitives)
+    return result

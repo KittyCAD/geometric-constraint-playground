@@ -11,6 +11,7 @@ from newton.constraints import Constraint
 from newton.logging_config import logger
 from newton.primitives import Primitive
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
+from newton.symbolic_substitution import find
 
 
 class Solver2DSparse(Solver2D):
@@ -28,7 +29,7 @@ class Solver2DSparse(Solver2D):
         variable_values: Mapping[str, float],
     ) -> csc_matrix:
         constraints: List[Constraint] = subproblem["constraints"]
-
+        substitution_map: Dict[str, str] = subproblem["substitution_map"]
         n_residuals = sum(c.n_residual_rows for c in constraints)
         n_variables = len(var_map)
 
@@ -42,8 +43,9 @@ class Solver2DSparse(Solver2D):
                 entries = constraint.get_jacobian_row_values(variable_values)
 
                 for var_id, value, i_row_local in entries:
-                    if var_id in var_map:
-                        i_col = var_map[var_id]
+                    root_var = find(var_id, substitution_map)
+                    if root_var in var_map:
+                        i_col = var_map[root_var]
                         jacobian[i_row + i_row_local, i_col] += value
 
             except NotImplementedError as e:
@@ -56,46 +58,41 @@ class Solver2DSparse(Solver2D):
         return jacobian.tocsc()
 
     def solve_constraint_system(self, system: Dict[str, Any]):
+        """Solve using sparse matrix methods."""
         free_primitives: List[Primitive] = system["free_primitives"]
         constraints: List[Constraint] = system["constraints"]
         substitution_map: Dict[str, str] = system["substitution_map"]
 
         if not free_primitives or not constraints:
-            logger.debug("Skipping block: No free points or no constraints.")
+            logger.debug("Skipping block: No free primitives or no constraints.")
             return
 
         logger.debug(
             f"Solving independently soluble system: {[p.id for p in free_primitives]}"
         )
 
-        # Create an ordered list of all variables we can solve for.
-        free_var_ids = [
-            var_id
-            for p in free_primitives
-            for var_id in p.get_variable_ids()
-            if var_id not in substitution_map
-        ]
+        # Determine the true independent variables for the solver.
+        # These are the variables from free primitives that are _not_ substituted by another variable.
+        independent_vars = self.get_independent_variables(free_primitives)
 
-        # Ensure no duplicate variable IDs.
-        if len(free_var_ids) != len(list(dict.fromkeys(free_var_ids))):
-            raise ValueError(
-                "Duplicate variable IDs found in the free variables. "
-                "This should not happen."
+        if not independent_vars:
+            logger.info(
+                "System is fully constrained by substitutions, nothing to solve."
             )
+            return
 
-        # Generic variable map for the free variables.
-        var_map = {var_id: i for i, var_id in enumerate(free_var_ids)}
-
-        # Build the initial guess array based on the ordered variable list.
+        var_map = {var_id: i for i, var_id in enumerate(independent_vars)}
         initial_values: Dict[str, float] = {}
+
         for p in self.primitives:
             initial_values.update(p.get_initial_variable_values())
 
-        initial_guess = np.array([initial_values[var_id] for var_id in free_var_ids])
+        initial_guess = np.array(
+            [initial_values[var_id] for var_id in independent_vars]
+        )
 
         def build_variable_values_map(
-            free_vars: np.ndarray,
-            initial_values: Mapping[str, float],
+            independent_vars_values: np.ndarray,
         ) -> Mapping[str, float]:
             # Builds the flat map of all variable IDs to their current values.
             # This is the single source of truth passed to the constraints.
@@ -105,35 +102,39 @@ class Solver2DSparse(Solver2D):
 
             # Create a dictionary of the variables the solver is currently optimizing.
             solved_vars = {
-                var_id: free_vars[i] for i, var_id in enumerate(free_var_ids)
+                var_id: independent_vars_values[i]
+                for i, var_id in enumerate(independent_vars)
             }
 
             # Overwrite the initial values with the current solved values.
             variable_values.update(solved_vars)
 
+            # More sub mop up.
+            for var_id, root_id in substitution_map.items():
+                if root_id in variable_values:
+                    variable_values[var_id] = variable_values[root_id]
+
             return variable_values
 
-        def residuals_vector(free_vars: np.ndarray) -> np.ndarray:
-            variable_values = build_variable_values_map(free_vars, initial_values)
+        def residuals_vector(independent_vars_values: np.ndarray) -> np.ndarray:
+            variable_values = build_variable_values_map(independent_vars_values)
             constraint_residuals = np.concatenate(
                 [c.get_residual(variable_values) for c in constraints]
             )
-
-            # Regularization residuals (lambda * (x - x_initial)).
-            reg_residuals = REGULARIZATION_LAMBDA * (free_vars - initial_guess)
-
-            # Combine them into the new augmented residual vector.
+            reg_residuals = REGULARIZATION_LAMBDA * (
+                independent_vars_values - initial_guess
+            )
             return np.concatenate([constraint_residuals, reg_residuals])
 
-        def jacobian_wrapper(free_vars: np.ndarray) -> csc_matrix:
+        def jacobian_wrapper(independent_vars_values: np.ndarray) -> csc_matrix:
             # Use the new generic helper function.
-            variable_values = build_variable_values_map(free_vars, initial_values)
+            variable_values = build_variable_values_map(independent_vars_values)
 
             # Original constraint Jacobian.
             jacobian = self.build_sparse_jacobian(system, var_map, variable_values)
 
             # Regularization Jacobian (lambda * I).
-            n_vars = len(free_vars)
+            n_vars = len(independent_vars)
             reg_jacobian = diags([REGULARIZATION_LAMBDA] * n_vars, format="csc")
 
             # Combine them vertically into the new augmented Jacobian.
@@ -150,16 +151,17 @@ class Solver2DSparse(Solver2D):
         # Because of our Tikhonov regularization, we need to adjust the number of equations.
         # We effectively vertically concatenate the actual Jacobian with another matrix of the
         # size (REG_LAMBDA * I), which adds n_variables more rows.
-        n_variables = jacobian_init.shape[1]
-        # n_equations = jacobian_init.shape[0]
+        n_variables_independent = len(independent_vars)
         n_geom_equations = sum(c.n_residual_rows for c in constraints)
 
-        self.check_system_state(jacobian_init.todense(), n_variables, n_geom_equations)
+        self.check_system_state(
+            jacobian_init.todense(), n_variables_independent, n_geom_equations
+        )
 
         # Actual solve magic using the least_squares method.
         # Not sure which is most appropriate here... CC Dave Reeves: current thinking
         # Levenberg-Marquardt (lm) is good because least squares and Newton's method.
-        # TRF is on the only supported method for sparse Jacobians.
+        # TRF is on the only supported method for sparse Jacobians
         result = least_squares(
             fun=residuals_vector,
             x0=initial_guess,
@@ -173,7 +175,7 @@ class Solver2DSparse(Solver2D):
 
         # Run checks and update.
         final_variable_values = self.compute_final_variable_values(
-            result, free_primitives, substitution_map
+            result, independent_vars, substitution_map
         )
         self.update_primitives_from_map(final_variable_values)
         self.assess_solver_result(final_variable_values, constraints)
