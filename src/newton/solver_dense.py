@@ -67,17 +67,15 @@ class Solver2DDense(Solver2D):
         def build_variable_values_map(
             independent_vars_values: jnp.ndarray,
         ) -> Mapping[str, Any]:
-            # The values are JAX tracers, but the dictionary itself is a standard
-            # Python object. This is safe as long as the keys don't change, which they don't.
-            variable_values = dict(initial_values)
-
+            # The values in solved_vars are JAX tracers, which behave like floats
+            # during JIT compilation.
             solved_vars = {
                 var_id: independent_vars_values[i]
                 for i, var_id in enumerate(independent_vars)
             }
 
             # Unpack the solved variables into the initial values map.
-            variable_values = {**variable_values, **solved_vars}
+            variable_values = {**initial_values, **solved_vars}
 
             # Apply substitutions dynamically.
             for var_id, root_id in substitution_map.items():

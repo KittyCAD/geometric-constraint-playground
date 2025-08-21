@@ -137,7 +137,7 @@ class Solver2DSparse(Solver2D):
             n_vars = len(independent_vars)
             reg_jacobian = diags([REGULARIZATION_LAMBDA] * n_vars, format="csc")
 
-            # Regularization Jacobian (lambda * I).
+            # Combine them vertically into the new augmented Jacobian.
             result = vstack([jacobian, reg_jacobian], format="csc")
 
             return csc_matrix(result)

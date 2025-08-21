@@ -274,7 +274,7 @@ class Solver2D(ABC):
 
             free_primitives = self.identify_free_primitives(system["primitives"])
             if free_primitives:
-                # Add free_primitives to the system dict for the concrete solver
+                # Add free_primitives to the system dict for the concrete solver.
                 system["free_primitives"] = free_primitives
                 logger.debug(f"Solving system {i + 1}/{len(constraint_systems)}")
                 self.solve_constraint_system(system)
@@ -282,7 +282,7 @@ class Solver2D(ABC):
     def compute_final_variable_values(
         self,
         result: OptimizeResult,
-        solved_var_ids: List[str],  # Changed signature
+        solved_var_ids: List[str],
         substitution_map: Dict[str, str],
     ) -> Dict[str, float]:
         # Start with the initial state of all variables in the system.
@@ -290,7 +290,7 @@ class Solver2D(ABC):
         for p in self.primitives:
             final_variable_values.update(p.get_initial_variable_values())
 
-        # The `solved_var_ids` list is the ground truth of what the optimizer solved for.
+        # Get what we actually solved for.
         solved_values = {var_id: result.x[i] for i, var_id in enumerate(solved_var_ids)}
 
         # Update the full map with the solved values.
