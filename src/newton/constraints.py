@@ -9,12 +9,10 @@ from newton import backend as nb
 from newton.constants import EPS
 from newton.primitives import Line, Point, Circle, CircularArc
 
-ArrayLike = Union[np.ndarray, jnp.ndarray]
-
 
 class BaseConstraint(ABC):
     @abstractmethod
-    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
         pass
 
     @abstractmethod
@@ -38,7 +36,7 @@ class BaseConstraint(ABC):
 @dataclass
 class PointFixed(BaseConstraint):
     point: Point
-    fixed_pos: ArrayLike = field(init=False)
+    fixed_pos: nb.Vector = field(init=False)
 
     def __post_init__(self):
         self.fixed_pos = nb.np.array([self.point.x, self.point.y])
@@ -47,7 +45,7 @@ class PointFixed(BaseConstraint):
     def n_residual_rows(self) -> int:
         return 2
 
-    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
         p = self.point.get_state(variable_values)
         return p - self.fixed_pos
 
@@ -155,7 +153,7 @@ class PointPointEuclideanDistance(BaseConstraint):
     p2: Point
     distance: float
 
-    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
         p1 = self.p1.get_state(variable_values)
         p2 = self.p2.get_state(variable_values)
         current_dist = nb.np.linalg.norm(p1 - p2)
@@ -522,7 +520,7 @@ class LinesPerpendicular(BaseConstraint):
     line1: Line
     line2: Line
 
-    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
         p1 = self.line1.p1.get_state(variable_values)
         p2 = self.line1.p2.get_state(variable_values)
 
@@ -619,7 +617,7 @@ class LinesEqualLength(BaseConstraint):
     line1: Line
     line2: Line
 
-    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
         # Get points.
         p1 = self.line1.p1.get_state(variable_values)
         p2 = self.line1.p2.get_state(variable_values)
@@ -722,7 +720,7 @@ class LineLineAngle(BaseConstraint):
     line2: Line
     angle: float = field()
 
-    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
         # Get direction vectors for both lines.
         p1 = self.line1.p1.get_state(variable_values)
         p2 = self.line1.p2.get_state(variable_values)
@@ -850,7 +848,7 @@ class LineLineDistance(BaseConstraint):
     line2: Line
     distance: float
 
-    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
         # Assumes lines are parallel, enforced by a LinesParallel constraint.
         p1 = self.line1.p1.get_state(variable_values)
         p2 = self.line1.p2.get_state(variable_values)
@@ -952,7 +950,7 @@ class CircleRadius(BaseConstraint):
     circle: Circle
     radius: float
 
-    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
         # We don't need get_state, as we only care about the radius variable.
 
         # Ask the circle for the ID of its radius variable.
@@ -985,7 +983,7 @@ class LineTangentToCircle(BaseConstraint):
     line: Line
     circle: Circle
 
-    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
         # Get the current state of the primitives.
         p1 = self.line.p1.get_state(variable_values)
         p2 = self.line.p2.get_state(variable_values)
@@ -1095,7 +1093,7 @@ class PointsEquidistant(BaseConstraint):
     p1: Point
     p2: Point
 
-    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
         # Get the current position of all three points.
         center_pos = self.center.get_state(variable_values)
         p1_pos = self.p1.get_state(variable_values)
@@ -1174,7 +1172,7 @@ class ArcRadius(BaseConstraint):
         # We need two residuals: one for center to start distance, one for center to end distance.
         return 2
 
-    def get_residual(self, variable_values: Mapping[str, float]) -> ArrayLike:
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
         # Reuse existing implementation from PointPointEuclideanDistance.
         center_to_start = PointPointEuclideanDistance(
             self.arc.center, self.arc.start, self.radius
