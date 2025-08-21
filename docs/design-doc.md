@@ -53,7 +53,7 @@
 - [5.3 Numerical Solve](#53-numerical-solve)
   - [5.3.1 Solver States & Solve Paths](#531-solver-states--solve-paths)
   - [5.3.2 Tikhonov Regularisation](#532-tikhonov-regularisation)
-- [5.4 Recommended Solver Approach: Sparse Quasi-Newton Method](#54-recommended-solver-approach-sparse-quasi-newton-method)
+- [5.4 Recommended Solver Approach: Sparse Newton Method](#54-recommended-solver-approach-sparse-newtons-method)
 - [5.5 Notes on Third Party Solvers](#55-notes-on-third-party-solvers)
 
 ## [6. Constraint Solver Diagnostics & Other UI/UX Considerations](#6-constraint-solver-diagnostics--other-uiux-considerations)
@@ -530,7 +530,7 @@ Some constraints (e.g., two points being coincident) can be used to eliminate va
 
 ### 5.3 Numerical Solve
 
-After pre-processing, the simplified system(s) of equations are passed to an iterative numerical solver, likely a sparse quasi-Newton method.
+After pre-processing, the simplified system(s) of equations are passed to an iterative numerical solver, likely a sparse Newton method.
 
 ### 5.3.1 Solver States & Solve Paths
 
@@ -549,7 +549,7 @@ The system of equations representing the sketch can take one of three states, wh
 
   - **Condition:** $rank(J) = n$
   - **Meaning:** The number of independent constraints is equal to the number of variables. This is the 'happy path' where the sketch has no remaining degrees of freedom. So long as the constraints are consistent, a single, unique solution exists. Note that this can occur even if `m > n`, if the extra constraints are redundant but not conflicting.
-  - **Solve Path:** A standard Newton's method (or a quasi-Newton variant) is used to iterate until the error $\lVert F(\textbf{x}) \rVert < tol$.
+  - **Solve Path:** A standard Newton's method (or a quasi-Newton variant where no analytical Jacobian is required) is used to iterate until the error $\lVert F(\textbf{x}) \rVert < tol$.
 
 - Over-defined, or [overdetermined](https://en.wikipedia.org/wiki/Overdetermined_system).
   - **Condition:** The system of equations is _inconsistent_. This typically occurs when $m > n$ and the constraints are conflicting.
@@ -577,13 +577,13 @@ modifies the equation to $(J^T J + \lambda^2 I)\delta x = -J^T r$.
 
 The $\lambda^2 I$ term is a positive diagonal matrix that ensures the combined matrix is invertible and stabilises the solution. This pushes the solver toward a solution that has a minimal deviation from its initial state, effectively finding the 'closest' (minimum-norm) valid solution (wrt. initial positions) when degrees of freedom exist.
 
-### 5.4 Recommended Solver Approach: Sparse Quasi-Newton Method
+### 5.4 Recommended Solver Approach: Sparse Newton's Method
 
 Given the nature of geometric constraint problems, where any given constraint typically only involves a small subset of the total variables, the resulting Jacobian matrix is likely to be very sparse. This sparsity is a critical feature to exploit for performance.
 
 A dense solver would waste significant computation on zero-value entries, whereas a sparse solver will only operate on the non-zero elements.
 
-While methods like Gauss-Newton or Levenberg-Marquardt are effective, a **sparse quasi-Newton method** is recommended. I am led to believe that modern sparse implementations of these algorithms are well-suited to the structure of geometric constraint problems.
+While methods like Gauss-Newton or Levenberg-Marquardt are effective, a **sparse Newton's method** approach is recommended. I am led to believe that modern sparse implementations of these algorithms are well-suited to the structure of geometric constraint problems.
 
 ### 5.5 Notes on Third Party Solvers
 
