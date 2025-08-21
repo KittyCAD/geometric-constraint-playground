@@ -131,7 +131,7 @@ class Solver2D(ABC):
     def check_system_state(
         self, jacobian, n_variables, n_equations, tolerance=NONZERO_RANK_TOLERANCE
     ):
-        rank = compute_rank(jacobian, tolerance, self.module)
+        rank = compute_rank(jacobian, tolerance)
 
         # Determine system state based on rank vs variables
         if rank < n_variables:
