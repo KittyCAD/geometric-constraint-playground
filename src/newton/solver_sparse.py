@@ -89,8 +89,10 @@ class Solver2DSparse(Solver2D):
 
         var_map = {var_id: i for i, var_id in enumerate(independent_vars)}
         initial_values: Dict[str, float] = {}
+
         for p in self.primitives:
             initial_values.update(p.get_initial_variable_values())
+
         initial_guess = np.array(
             [initial_values[var_id] for var_id in independent_vars]
         )

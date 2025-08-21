@@ -7,7 +7,11 @@ import numpy as np
 
 from newton import backend as nb
 from newton.constants import EPS
-from newton.primitives import Line, Point, Circle, CircularArc
+from newton.primitives import Circle, CircularArc, Line, Point
+
+# Note that for get_residual methods, we can't have if statements because JAX
+# doesn't support control flow in JIT-compiled functions. Instead, we use
+# numpy's where function to handle conditional logic.
 
 
 class BaseConstraint(ABC):
@@ -1001,15 +1005,18 @@ class LineTangentToCircle(BaseConstraint):
         mag_v = nb.np.linalg.norm(v)
 
         # Avoid division by zero for a zero-length line segment.
-        if mag_v < EPS:
-            return nb.np.array([0.0])
+        safe_mag_v = nb.np.where(mag_v < EPS, 1.0, mag_v)
 
         # Signed cross product (no absolute value).
         cross_product = v[0] * w[1] - v[1] * w[0]
-        signed_distance_to_line = cross_product / mag_v
+        signed_distance_to_line = cross_product / safe_mag_v
 
         # The residual is the difference between this signed distance and the circle's radius.
-        return nb.np.array([signed_distance_to_line - radius])
+        residual = signed_distance_to_line - radius
+
+        # The JAX-compatible equivalent of an if-statement.
+        # If the line has no length, the residual is 0, otherwise it's the calculated value.
+        return nb.np.where(mag_v < EPS, nb.np.array([0.0]), nb.np.array([residual]))
 
     def get_jacobian_row_values(
         self, variable_values: Mapping[str, float]
