@@ -45,15 +45,7 @@ class Solver2DDense(Solver2D):
 
         # Determine the true independent variables for the solver.
         # These are the variables from free primitives that are _not_ substituted by another variable.
-        independent_vars = [
-            var_id
-            for p in free_primitives
-            for var_id in p.get_variable_ids()
-            if var_id not in substitution_map
-        ]
-
-        # Ensure a deterministic order.
-        independent_vars.sort()
+        independent_vars = self.get_independent_variables(free_primitives)
 
         if not independent_vars:
             logger.info(

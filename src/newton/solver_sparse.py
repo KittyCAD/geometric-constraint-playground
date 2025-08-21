@@ -10,7 +10,8 @@ from newton.constants import REGULARIZATION_LAMBDA
 from newton.constraints import Constraint
 from newton.logging_config import logger
 from newton.primitives import Primitive
-from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D, find
+from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
+from newton.symbolic_substitution import find
 
 
 class Solver2DSparse(Solver2D):
@@ -57,6 +58,7 @@ class Solver2DSparse(Solver2D):
         return jacobian.tocsc()
 
     def solve_constraint_system(self, system: Dict[str, Any]):
+        """Solve using sparse matrix methods."""
         free_primitives: List[Primitive] = system["free_primitives"]
         constraints: List[Constraint] = system["constraints"]
         substitution_map: Dict[str, str] = system["substitution_map"]
@@ -71,15 +73,7 @@ class Solver2DSparse(Solver2D):
 
         # Determine the true independent variables for the solver.
         # These are the variables from free primitives that are _not_ substituted by another variable.
-        independent_vars = [
-            var_id
-            for p in free_primitives
-            for var_id in p.get_variable_ids()
-            if var_id not in substitution_map
-        ]
-
-        # Ensure a deterministic order.
-        independent_vars.sort()
+        independent_vars = self.get_independent_variables(free_primitives)
 
         if not independent_vars:
             logger.info(
