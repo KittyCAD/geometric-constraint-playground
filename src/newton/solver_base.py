@@ -46,13 +46,14 @@ class Solver2D(ABC):
         self.primitives = primitives
         self.primitive_map = {p.id: p for p in primitives}
         self.constraints: List[Constraint] = all_constraints
-        self.free_primitives = self.identify_free_primitives()
 
         self.module: ModuleType = (
             np  # Default to numpy, can be overridden by subclasses.
         )
 
-    def identify_free_primitives(self) -> List[Primitive]:
+    def identify_free_primitives(
+        self, primitives_to_check: List[Primitive]
+    ) -> List[Primitive]:
         # Find the non-fixed elements our solver can play tunes with.
         # However... we actually do want to feed fixed points to the structural analyzer,
         # because they may be help in solving other parts of the system.
@@ -61,7 +62,7 @@ class Solver2D(ABC):
             if isinstance(c, PointFixed):
                 fixed_primitive_ids.add(c.point.id)
 
-        return [p for p in self.primitives if p.id not in fixed_primitive_ids]
+        return [p for p in primitives_to_check if p.id not in fixed_primitive_ids]
 
     def build_dependency_graph(self) -> nx.Graph:
         graph = nx.Graph()
@@ -96,6 +97,7 @@ class Solver2D(ABC):
         constraint_systems = []
 
         for component in nx.connected_components(graph):
+            # Gather all primitives involved in a component.
             i_comp_constraints = {
                 graph.nodes[node]["constraint_index"]
                 for node in component
@@ -105,12 +107,17 @@ class Solver2D(ABC):
                 continue
 
             comp_constraints = [self.constraints[i] for i in i_comp_constraints]
-            comp_primitive_ids = {
-                node.split("_")[0]
-                for node in component
-                if graph.nodes[node].get("bipartite") == 0
-            }
-            comp_primitives = [self.primitive_map[pid] for pid in comp_primitive_ids]
+
+            # Then, gather all unique primitives touched by these constraints.
+            comp_primitive_ids = set()
+            for c in comp_constraints:
+                comp_primitive_ids.update(c.get_involved_primitive_ids())
+
+            comp_primitives = [
+                self.primitive_map[pid]
+                for pid in comp_primitive_ids
+                if pid in self.primitive_map
+            ]
 
             constraint_systems.append(
                 {"constraints": comp_constraints, "primitives": comp_primitives}
@@ -181,9 +188,6 @@ class Solver2D(ABC):
             print("No constraints to solve.")
             return
 
-        # Build a 1:1 point mapping for consistency with the substitution method.
-        self.primitive_map = {p.id: p for p in self.primitives}
-
         # Split the problem into wholly disconnected problems.
         graph = self.build_dependency_graph()
         constraint_systems = self.find_disconnected_systems(graph)
@@ -202,10 +206,11 @@ class Solver2D(ABC):
             if not system["constraints"]:
                 continue
 
-            if self.free_primitives:
+            free_primitives = self.identify_free_primitives(system["primitives"])
+            if free_primitives:
                 solver_block = {
-                    "free_primitives": self.free_primitives,
-                    "constraints": self.constraints,
+                    "free_primitives": free_primitives,
+                    "constraints": system["constraints"],
                     "substitution_map": {},
                 }
                 self.solve_constraint_system(solver_block)
@@ -238,16 +243,7 @@ class Solver2D(ABC):
                 system["constraints"], system["primitives"]
             )
 
-            # Get the simplified primitive list.
-            simplified_primitives = self.get_simplified_primitives(
-                simplified_constraints
-            )
-
-            # Use simplified primitives for the free primitive calculation
-            free_primitives = self.get_free_primitives_from_simplified(
-                simplified_primitives, substitution_map
-            )
-
+            free_primitives = self.identify_free_primitives(system["primitives"])
             if free_primitives:
                 solver_block = {
                     "free_primitives": free_primitives,
@@ -256,49 +252,10 @@ class Solver2D(ABC):
                 }
                 self.solve_constraint_system(solver_block)
 
-    def get_simplified_primitives(
-        self, simplified_constraints: List[Constraint]
-    ) -> List[Primitive]:
-        primitive_ids = set()
-        for c in simplified_constraints:
-            primitive_ids.update(c.get_involved_primitive_ids())
-
-        return [
-            self.primitive_map[pid]
-            for pid in primitive_ids
-            if pid in self.primitive_map
-        ]
-
-    def get_free_primitives_from_simplified(
-        self, simplified_primitives: List[Primitive], substitution_map: Dict[str, str]
-    ) -> List[Primitive]:
-        fixed_primitive_ids = set()
-        for c in self.constraints:
-            if isinstance(c, PointFixed):
-                fixed_primitive_ids.add(c.point.id)
-
-        truly_free_primitives = []
-        for p in simplified_primitives:
-            if p.id in fixed_primitive_ids:
-                continue
-
-            # Check if any of the primitive's variables are "roots"
-            # (i.e., they are not a key in the substitution map).
-            is_truly_free = False
-            for var_id in p.get_variable_ids():
-                if var_id not in substitution_map:
-                    is_truly_free = True
-                    break  # Found a free variable, so the primitive is free.
-
-            if is_truly_free:
-                truly_free_primitives.append(p)
-
-        return truly_free_primitives
-
     def compute_final_variable_values(
         self,
         result: OptimizeResult,
-        free_primitives: List[Primitive],
+        solved_var_ids: List[str],  # Changed signature
         substitution_map: Dict[str, str],
     ) -> Dict[str, float]:
         # Start with the initial state of all variables in the system.
@@ -306,22 +263,7 @@ class Solver2D(ABC):
         for p in self.primitives:
             final_variable_values.update(p.get_initial_variable_values())
 
-        # Get the variables that were actually part of the numerical solve.
-        solved_var_ids = [
-            var_id
-            for p in free_primitives
-            for var_id in p.get_variable_ids()
-            if var_id not in substitution_map
-        ]
-
-        # Duplicate check, but we shouldn't need this.
-        if len(solved_var_ids) != len(list(dict.fromkeys(solved_var_ids))):
-            raise ValueError(
-                "Duplicate variable IDs found in the solved variables. "
-                "This should not happen."
-            )
-
-        # Create a map of the new, solved values.
+        # The `solved_var_ids` list is the ground truth of what the optimizer solved for.
         solved_values = {var_id: result.x[i] for i, var_id in enumerate(solved_var_ids)}
 
         # Update the full map with the solved values.

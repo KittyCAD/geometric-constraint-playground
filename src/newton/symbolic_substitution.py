@@ -4,6 +4,7 @@ from newton.constraints import (
     LineHorizontal,
     LinesParallel,
     LineVertical,
+    PointPointCoincident,
     PointPointEuclideanDistance,
     PointPointXDistance,
     PointPointYDistance,
@@ -128,13 +129,15 @@ def perform_symbolic_substitution(
     """
     Performs a symbolic substitution pass on a constraint system.
 
-    This function finds simple equality constraints (e.g., two points being coincident)
-    and uses them to eliminate variables from the system. It does this by
-    rewriting the remaining constraints to use a single surrogate variable
-    for each set of equivalent variables.
+    This function interrogates the constraints to find equivalent variables.
+    It returns a list of constraints that are still active (i.e., not
+    fully redundant) and a substitution map that maps each substitutable
+    variable to its root representative.
 
-    Returns: (simplified_constraints, point_id_mapping)
-    where point_id_mapping maps original_point_id -> simplified_point_id
+    Returns:
+        (active_constraints, substitution_map)
+        - active_constraints: A list of constraints for the solver.
+        - substitution_map: A dict mapping var_id -> root_var_id.
     """
     primitive_map = {p.id: p for p in primitives}
 
@@ -146,25 +149,45 @@ def perform_symbolic_substitution(
     # Build the equivalence sets using 'Union-Find'.
     for i, c in enumerate(constraints):
         match c:
-            case PointPointEuclideanDistance() if c.distance < EPS:
-                # All variables of p1 and p2 become equivalent.
+            # Pure equality constraints: can be used for substitution and then skipped.
+            case PointPointCoincident():
                 for v1, v2 in zip(c.p1.get_variable_ids(), c.p2.get_variable_ids()):
                     union(v1, v2, parent_map)
                 constraints_to_skip.add(i)
 
+            case PointPointEuclideanDistance() if c.distance < EPS:
+                for v1, v2 in zip(c.p1.get_variable_ids(), c.p2.get_variable_ids()):
+                    union(v1, v2, parent_map)
+                constraints_to_skip.add(i)
+
+            # Partial equality constraints: use for substitution, but do not skip, because:
+            # - They only establish equality for some coordinates, not all.
+            # - The solver still needs the constraint equation to enforce the relationship.
+            # - They represent geometric conditions that must be maintained even after substitution.
+
             case PointPointXDistance() if c.distance < EPS:
-                # Only the 'x' variables become equivalent.
                 p1_x_var = c.p1.get_variable_ids()[0]
                 p2_x_var = c.p2.get_variable_ids()[0]
                 union(p1_x_var, p2_x_var, parent_map)
-                constraints_to_skip.add(i)
+                # Don't skip.
 
             case PointPointYDistance() if c.distance < EPS:
-                # Only the 'y' variables become equivalent.
                 p1_y_var = c.p1.get_variable_ids()[1]
                 p2_y_var = c.p2.get_variable_ids()[1]
                 union(p1_y_var, p2_y_var, parent_map)
-                constraints_to_skip.add(i)
+                # Don't skip.
+
+            case LineHorizontal():
+                p1_y_var = c.line.p1.get_variable_ids()[1]
+                p2_y_var = c.line.p2.get_variable_ids()[1]
+                union(p1_y_var, p2_y_var, parent_map)
+                # Don't skip.
+
+            case LineVertical():
+                p1_x_var = c.line.p1.get_variable_ids()[0]
+                p2_x_var = c.line.p2.get_variable_ids()[0]
+                union(p1_x_var, p2_x_var, parent_map)
+                # Don't skip.
 
         # TODO: Handle other constraint types.
 
