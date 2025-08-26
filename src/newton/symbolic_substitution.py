@@ -6,7 +6,6 @@ from newton.constants import EPS
 from newton.constraints import (
     Constraint,
     LineHorizontal,
-    LinesParallel,
     LineVertical,
     PointPointCoincident,
     PointPointEuclideanDistance,
@@ -14,7 +13,7 @@ from newton.constraints import (
     PointPointYDistance,
 )
 from newton.logging_config import logger
-from newton.primitives import Line, Point, Primitive
+from newton.primitives import Primitive
 
 
 class SubstitutionAction(Enum):
@@ -37,7 +36,6 @@ class SubstitutionStats:
     def __init__(self):
         self.variables_eliminated = 0
         self.constraints_eliminated = 0
-        self.constraints_rewritten = 0
         self.constraints_unchanged = 0
         self.substitution_map_size = 0
 
@@ -50,7 +48,6 @@ class SubstitutionStats:
         logger.debug("Symbolic substitution results:")
         logger.debug(f"  • {self.variables_eliminated} variables eliminated")
         logger.debug(f"  • {self.constraints_eliminated} constraints eliminated")
-        logger.debug(f"  • {self.constraints_rewritten} constraints rewritten")
         logger.debug(f"  • {self.constraints_unchanged} constraints unchanged")
 
 
@@ -60,7 +57,6 @@ class SubstitutionResults:
     active_constraints: Sequence[Constraint]
     substitution_map: Dict[str, str]
     constraints_eliminated: int
-    constraints_rewritten: int
     constraints_unchanged: int
 
 
@@ -93,91 +89,6 @@ def union(var1_id: str, var2_id: str, parent_map: dict[str, str]):
             parent_map[root1] = root2
 
 
-def get_substituted_primitive(
-    p: Primitive,
-    parent_map: dict[str, str],
-    primitive_map: dict[str, Primitive],
-) -> Primitive:
-    # Finds the single primitive that `p` has been substituted with.
-    # It's used to rewrite constraints that require a full primitive object.
-
-    # Find the root primitive ID for the first variable of p. This is our candidate
-    # for the new representative primitive.
-    variable_ids = p.get_variable_ids()
-    if not variable_ids:
-        return p
-
-    first_var_root = find(variable_ids[0], parent_map)
-    representative_prim_id = first_var_root.split("_")[0]
-
-    # Check if all other variables of p map to this same representative primitive.
-    for var_id in variable_ids[1:]:
-        root = find(var_id, parent_map)
-        prim_id = root.split("_")[0]
-        if prim_id != representative_prim_id:
-            # This is a partial substitution (e.g., only x-coords are equal).
-            # We cannot rewrite the constraint with a single new primitive, so we return
-            # the original.
-            return p
-
-    return primitive_map[representative_prim_id]
-
-
-def rewrite_constraint(
-    c: Constraint, parent_map: dict[str, str], primitive_map: dict[str, Primitive]
-) -> Constraint:
-    # Creates a new constraint object with substituted primitives.
-    match c:
-        case (
-            PointPointEuclideanDistance()
-            | PointPointXDistance()
-            | PointPointYDistance()
-        ):
-            p1_sub = get_substituted_primitive(c.p1, parent_map, primitive_map)
-            p2_sub = get_substituted_primitive(c.p2, parent_map, primitive_map)
-
-            if not isinstance(p1_sub, Point) or not isinstance(p2_sub, Point):
-                return c
-
-            return type(c)(p1=p1_sub, p2=p2_sub, distance=c.distance)
-
-        case LineHorizontal() | LineVertical():
-            p1_sub = get_substituted_primitive(c.line.p1, parent_map, primitive_map)
-            p2_sub = get_substituted_primitive(c.line.p2, parent_map, primitive_map)
-
-            if not isinstance(p1_sub, Point) or not isinstance(p2_sub, Point):
-                return c
-
-            new_line = Line(p1=p1_sub, p2=p2_sub, id=c.line.id)
-            return type(c)(line=new_line)
-
-        case LinesParallel():
-            l1_p1_sub = get_substituted_primitive(c.line1.p1, parent_map, primitive_map)
-            l1_p2_sub = get_substituted_primitive(c.line1.p2, parent_map, primitive_map)
-            l2_p1_sub = get_substituted_primitive(c.line2.p1, parent_map, primitive_map)
-            l2_p2_sub = get_substituted_primitive(c.line2.p2, parent_map, primitive_map)
-
-            if (
-                not isinstance(l1_p1_sub, Point)
-                or not isinstance(l1_p2_sub, Point)
-                or not isinstance(l2_p1_sub, Point)
-                or not isinstance(l2_p2_sub, Point)
-            ):
-                return c
-
-            new_line1 = Line(p1=l1_p1_sub, p2=l1_p2_sub, id=c.line1.id)
-            new_line2 = Line(p1=l2_p1_sub, p2=l2_p2_sub, id=c.line2.id)
-            return LinesParallel(line1=new_line1, line2=new_line2)
-
-        case _:
-            # Default case - return the original constraint
-            return c
-
-    # TODO: Add other constraint types.
-
-    return c
-
-
 class SymbolicSubstitution:
     """
     Handles symbolic substitution with clear separation between:
@@ -190,7 +101,6 @@ class SymbolicSubstitution:
         self.parent_map: dict[str, str] = {}
         self.substitution_rules: List[SubstitutionRule] = []
         self.constraints_to_eliminate: Set[int] = set()
-        self.constraints_rewritten_count = 0
 
     def analyze_constraint(
         self, constraint: Constraint, index: int
@@ -303,7 +213,6 @@ class SymbolicSubstitution:
         self, constraints: Sequence[Constraint], primitives: Sequence[Primitive]
     ) -> SubstitutionResults:
         # Apply symbolic substitution and return nice, structured results.
-        original_constraint_count = len(constraints)
         substitution_map = self.build_substitution_map(constraints, primitives)
 
         if not substitution_map:
@@ -312,49 +221,32 @@ class SymbolicSubstitution:
                 active_constraints=constraints,
                 substitution_map={},
                 constraints_eliminated=0,
-                constraints_rewritten=0,
                 constraints_unchanged=len(constraints),
             )
 
         logger.info(f"Found {len(substitution_map)} variable substitutions to perform.")
         logger.debug(f"Substitution map: {substitution_map}")
 
-        # Rewrite the constraint list using the new primitive set.
         simplified_constraints: list[Constraint] = []
-        primitive_map = {p.id: p for p in primitives}
 
         for i, constraint in enumerate(constraints):
             if i in self.constraints_to_eliminate:
                 logger.debug(f"Eliminating constraint {i}: {type(constraint).__name__}")
                 continue
+            simplified_constraints.append(constraint)
 
-            # Apply substitutions to this constraint.
-            new_constraint = rewrite_constraint(
-                constraint, self.parent_map, primitive_map
-            )
-            simplified_constraints.append(new_constraint)
-
-            # Track if this constraint was actually rewritten.
-            if new_constraint is not constraint:
-                self.constraints_rewritten_count += 1
-
-        constraints_eliminated = original_constraint_count - len(simplified_constraints)
-        constraints_unchanged = (
-            len(simplified_constraints) - self.constraints_rewritten_count
-        )
+        constraints_eliminated = len(self.constraints_to_eliminate)
+        constraints_unchanged = len(simplified_constraints)
 
         return SubstitutionResults(
             active_constraints=simplified_constraints,
             substitution_map=substitution_map,
             constraints_eliminated=constraints_eliminated,
-            constraints_rewritten=self.constraints_rewritten_count,
             constraints_unchanged=constraints_unchanged,
         )
 
     def _get_all_variables(self, primitives: Sequence[Primitive]) -> Set[str]:
-        # Get all variables from all primitives.
-        all_var_ids = {var_id for p in primitives for var_id in p.get_variable_ids()}
-        return all_var_ids
+        return {var_id for p in primitives for var_id in p.get_variable_ids()}
 
 
 def perform_symbolic_substitution(

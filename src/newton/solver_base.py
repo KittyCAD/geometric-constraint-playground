@@ -51,8 +51,8 @@ class Solver2D(ABC):
         # Store the primitives and constraints.
         self.primitives = primitives
         self.primitive_map = {p.id: p for p in primitives}
-        self.original_constraints: List[Constraint] = all_constraints
-        self.active_constraints: List[Constraint] = []
+        self.original_constraints: Sequence[Constraint] = all_constraints
+        self.active_constraints: Sequence[Constraint] = []
         self.substitution_map: Dict[str, str] = {}
         self.substitution_stats = SubstitutionStats()
 
@@ -81,7 +81,6 @@ class Solver2D(ABC):
 
         # Use the detailed statistics from the substitution process.
         self.substitution_stats.constraints_eliminated = results.constraints_eliminated
-        self.substitution_stats.constraints_rewritten = results.constraints_rewritten
         self.substitution_stats.constraints_unchanged = results.constraints_unchanged
         self.substitution_stats.variables_eliminated = len(self.substitution_map)
         self.substitution_stats.substitution_map_size = len(self.substitution_map)
