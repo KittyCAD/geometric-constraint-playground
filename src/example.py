@@ -28,7 +28,7 @@ from newton.primitives import Circle, CircularArc, Line, Point, Primitive
 from newton.solver_dense import Solver2DDense
 from newton.solver_sparse import Solver2DSparse
 
-configure_logging(level=logging.INFO)
+configure_logging(level=logging.DEBUG)
 
 PLOT = True
 

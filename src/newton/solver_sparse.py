@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Sequence
 
 import numpy as np
 from scipy.optimize import least_squares
@@ -15,7 +15,9 @@ from newton.symbolic_substitution import find
 
 
 class Solver2DSparse(Solver2D):
-    def __init__(self, primitives: List[Primitive], constraints: List[Constraint]):
+    def __init__(
+        self, primitives: Sequence[Primitive], constraints: Sequence[Constraint]
+    ):
         super().__init__(primitives, constraints)
 
         # Handle backend setup.
@@ -53,7 +55,7 @@ class Solver2DSparse(Solver2D):
 
             i_row += constraint.n_residual_rows
 
-        logger.debug("Jacobian:\n%s", jacobian.toarray())
+        # logger.debug("Jacobian:\n%s", jacobian.toarray())
 
         return jacobian.tocsc()
 
