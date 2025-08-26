@@ -84,42 +84,21 @@ class Solver2DSparse(Solver2D):
             return
 
         var_map = {var_id: i for i, var_id in enumerate(independent_vars)}
-        initial_values: Dict[str, float] = {}
 
-        for p in self.primitives:
-            initial_values.update(p.get_initial_variable_values())
-
+        # Use the consolidated method from base class
+        initial_values = self.get_initial_values_for_all_variables()
         initial_guess = np.array(
             [initial_values[var_id] for var_id in independent_vars]
         )
 
-        def build_variable_values_map(
-            independent_vars_values: np.ndarray,
-        ) -> Mapping[str, float]:
-            # Builds the flat map of all variable IDs to their current values.
-            # This is the single source of truth passed to the constraints.
-
-            # Start with the initial state of all variables in the system.
-            variable_values = dict(initial_values)
-
-            # Create a dictionary of the variables the solver is currently optimizing.
-            solved_vars = {
-                var_id: independent_vars_values[i]
-                for i, var_id in enumerate(independent_vars)
-            }
-
-            # Overwrite the initial values with the current solved values.
-            variable_values.update(solved_vars)
-
-            # More sub mop up.
-            for var_id, root_id in substitution_map.items():
-                if root_id in variable_values:
-                    variable_values[var_id] = variable_values[root_id]
-
-            return variable_values
-
         def residuals_vector(independent_vars_values: np.ndarray) -> np.ndarray:
-            variable_values = build_variable_values_map(independent_vars_values)
+            variable_values = self.build_variable_values_map(
+                independent_vars_values,
+                independent_vars,
+                initial_values,
+                substitution_map,
+            )
+
             constraint_residuals = np.concatenate(
                 [c.get_residual(variable_values) for c in constraints]
             )
@@ -129,8 +108,12 @@ class Solver2DSparse(Solver2D):
             return np.concatenate([constraint_residuals, reg_residuals])
 
         def jacobian_wrapper(independent_vars_values: np.ndarray) -> csc_matrix:
-            # Use the new generic helper function.
-            variable_values = build_variable_values_map(independent_vars_values)
+            variable_values = self.build_variable_values_map(
+                independent_vars_values,
+                independent_vars,
+                initial_values,
+                substitution_map,
+            )
 
             # Original constraint Jacobian.
             jacobian = self.build_sparse_jacobian(system, var_map, variable_values)
@@ -175,8 +158,9 @@ class Solver2DSparse(Solver2D):
             verbose=2 if logger.isEnabledFor(logging.DEBUG) else 0,
         )
 
-        # Run checks and update.
-        final_variable_values = self.compute_final_variable_values(
+        # Run checks and update using the consolidated method from the base class.
+        # This effectively fanss out the final variable values through the substitution map.
+        final_variable_values = self.fan_out_solved_variable_values(
             result, independent_vars, substitution_map
         )
         self.update_primitives_from_map(final_variable_values)
