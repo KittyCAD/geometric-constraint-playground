@@ -486,7 +486,7 @@ def constrain_perpendicular_with_shared_vertex():
     l1 = Line(p1, p2, id="L1")
     l2 = Line(p2, p3, id="L2")
 
-    # Ensure segments share the middle vertex
+    # Ensure segments share the middle vertex.
     assert l1.p2 is l2.p1, "Segments must share the middle vertex"
 
     primitives = [p1, p2, p3, l1, l2]
@@ -499,17 +499,17 @@ def constrain_perpendicular_with_shared_vertex():
         LinesPerpendicular(l1, l2),
     ]
 
-    # Plot initial state
+    # Plot initial state.
     if PLOT:
         plt.figure(figsize=(8, 8))
         plot_geometry(primitives, color="red", label="Initial", prime=False)
 
-    # Solve
+    # Solve.
     Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
     solver = Solver2D(primitives=primitives, constraints=constraints)
     solver.solve()
 
-    # Plot final state
+    # Plot final state.
     if PLOT:
         plot_geometry(primitives, color="blue", label="Solved", prime=True)
         plt.legend()
