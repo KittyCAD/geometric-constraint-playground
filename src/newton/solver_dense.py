@@ -5,7 +5,7 @@
 #   shapes.
 
 import logging
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -21,7 +21,9 @@ from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 
 class Solver2DDense(Solver2D):
-    def __init__(self, primitives: List[Primitive], constraints: List[Constraint]):
+    def __init__(
+        self, primitives: Sequence[Primitive], constraints: Sequence[Constraint]
+    ):
         super().__init__(primitives, constraints)
 
         # Handle backend setup.

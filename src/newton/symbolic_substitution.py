@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Dict, List, Set
+from typing import Dict, List, Sequence, Set
 
 from newton.constants import EPS
 from newton.constraints import (
@@ -57,7 +57,7 @@ class SubstitutionStats:
 @dataclass
 class SubstitutionResults:
     # Results from the substitution process.
-    active_constraints: List[Constraint]
+    active_constraints: Sequence[Constraint]
     substitution_map: Dict[str, str]
     constraints_eliminated: int
     constraints_rewritten: int
@@ -85,8 +85,12 @@ def union(var1_id: str, var2_id: str, parent_map: dict[str, str]):
     root2 = find(var2_id, parent_map)
 
     if root1 != root2:
-        # Simple union: make one root the parent of the other.
-        parent_map[root1] = root2
+        # Simple union: make one root the parent of the other. Choose the lexicographically
+        # smaller one as the new root for consistency.
+        if root1 < root2:
+            parent_map[root2] = root1
+        else:
+            parent_map[root1] = root2
 
 
 def get_substituted_primitive(
@@ -266,7 +270,7 @@ class SymbolicSubstitution:
         return rules
 
     def build_substitution_map(
-        self, constraints: List[Constraint], primitives: List[Primitive]
+        self, constraints: Sequence[Constraint], primitives: Sequence[Primitive]
     ) -> Dict[str, str]:
         """
         Build the final substitution map using union-find.
@@ -296,7 +300,7 @@ class SymbolicSubstitution:
         return substitution_map
 
     def apply_substitutions(
-        self, constraints: List[Constraint], primitives: List[Primitive]
+        self, constraints: Sequence[Constraint], primitives: Sequence[Primitive]
     ) -> SubstitutionResults:
         # Apply symbolic substitution and return nice, structured results.
         original_constraint_count = len(constraints)
@@ -347,14 +351,14 @@ class SymbolicSubstitution:
             constraints_unchanged=constraints_unchanged,
         )
 
-    def _get_all_variables(self, primitives: List[Primitive]) -> Set[str]:
+    def _get_all_variables(self, primitives: Sequence[Primitive]) -> Set[str]:
         # Get all variables from all primitives.
         all_var_ids = {var_id for p in primitives for var_id in p.get_variable_ids()}
         return all_var_ids
 
 
 def perform_symbolic_substitution(
-    constraints: list[Constraint], primitives: list[Primitive]
+    constraints: Sequence[Constraint], primitives: Sequence[Primitive]
 ) -> SubstitutionResults:
     substitution = SymbolicSubstitution()
     result = substitution.apply_substitutions(constraints, primitives)

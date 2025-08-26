@@ -2,7 +2,7 @@ import logging
 from abc import ABC, abstractmethod
 from enum import Enum
 from types import ModuleType
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 import networkx as nx
 import numpy as np
@@ -39,7 +39,9 @@ if logger.isEnabledFor(logging.DEBUG):
 
 
 class Solver2D(ABC):
-    def __init__(self, primitives: List[Primitive], constraints: List[Constraint]):
+    def __init__(
+        self, primitives: Sequence[Primitive], constraints: Sequence[Constraint]
+    ):
         # Build our full set of constraints: this will be the user-defined constraints
         # passed in, plus our definitional constraints from the primitives.
         all_constraints = list(constraints)
