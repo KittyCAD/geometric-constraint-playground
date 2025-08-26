@@ -118,7 +118,7 @@ def analyze_constraint(
 
             constraints_to_eliminate.add(index)
 
-        # Partial equality constraints: use for substitution, but do not skip, because:
+        # Partial equality constraints, so no elimination, just substitution of variables:
         # - They only establish equality for some coordinates, not all.
         # - The solver still needs the constraint equation to enforce the relationship.
         # - They represent geometric conditions that must be maintained even after substitution.
@@ -131,7 +131,6 @@ def analyze_constraint(
                     p1_x_var, p2_x_var, SubstitutionAction.SUBSTITUTE_AND_KEEP
                 )
             )
-            # Don't skip.
 
         case PointPointYDistance() if constraint.distance < EPS:
             p1_y_var = constraint.p1.get_variable_ids()[1]
@@ -141,7 +140,6 @@ def analyze_constraint(
                     p1_y_var, p2_y_var, SubstitutionAction.SUBSTITUTE_AND_KEEP
                 )
             )
-            # Don't skip.
 
         case LineHorizontal():
             p1_y_var = constraint.line.p1.get_variable_ids()[1]
@@ -151,7 +149,6 @@ def analyze_constraint(
                     p1_y_var, p2_y_var, SubstitutionAction.SUBSTITUTE_AND_KEEP
                 )
             )
-            # Don't skip.
 
         case LineVertical():
             p1_x_var = constraint.line.p1.get_variable_ids()[0]
@@ -161,7 +158,6 @@ def analyze_constraint(
                     p1_x_var, p2_x_var, SubstitutionAction.SUBSTITUTE_AND_KEEP
                 )
             )
-            # Don't skip.
 
     # TODO: Handle other constraint types.
 
