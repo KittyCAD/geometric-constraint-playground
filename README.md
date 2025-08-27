@@ -17,16 +17,15 @@ function that returns how distant from being satisfied the constraint is. For ex
 distance constraint, the residual would be `current_distance - target_distance`. When all
 constraints are satisfied, all residuals will be zero (within some tolerance).
 
-For the exactly determined case with as many constraints as degrees of freedom, this forms
+For the exactly determined case (locally as many independent constraints as degrees of freedom), this forms
 a multivariate root-finding problem for which we can use Newton's method to find the variable values that make all residuals zero.
 
 In practice, we often have more constraints than degrees of freedom (overdetermined) or fewer constraints than degrees of freedom (underdetermined).
 
 The underdetermined case is particularly common in cases like a 2D sketcher, where the user's progressive
 application of constraints may leave several degrees of freedom remaining as the constraint system
-is built up. In this case, we can adjust our problem to achieve a minimum-norm solution that
-satisfies the constraints while deviating as little as possible from the initial guess, i.e.,
-the system's state as drawn.
+is built up. In this case, we can adjust our problem to achieve a minimum-norm step that
+satisfies the constraints.
 
 For the overdetermined case, we typically want to report an error to the user, but we can also
 solve a least-squares problem to find the best-fit solution that minimises the sum of squared
@@ -159,22 +158,41 @@ Notes:
 - This is an $A x = b$-like solve at each iteration.
 - $F(x)$ is the stacked residual vector (one entry per constraint), not a sum of residuals.
 
-### Underdetermined case
+### Notes on Gauss–Newton
 
-To handle underdetermined systems, we use Tikhonov regularisation with the [normal equations](https://mathworld.wolfram.com/NormalEquation.html) formulation of Newton's method:
+Newton's method as described above is suitable for exactly determined systems (locally as many
+independent constraints as degrees of freedom). In practice, we often have underdetermined or
+overdetermined systems for which this approach will not work directly.
+
+[Gauss-Newton](https://en.wikipedia.org/wiki/Gauss%E2%80%93Newton_algorithm) is an extension
+of Newton's method that can handle these cases by effectively minimising the sum of squared residuals.
+
+The basic idea is to introduce [normal equations](https://mathworld.wolfram.com/NormalEquation.html)
+to transform the problem into a form that can be solved even when the system is not exactly determined. In this way:
+
+$$
+J \Delta x = -F(x_n).
+$$
+
+Becomes:
 
 $$J^\top J \Delta x = -J^\top F(x_n)$$
 
-Adding our regularisation term, we have:
+### Underdetermined case
+
+To handle underdetermined systems, we use Tikhonov regularisation with the Gauss–Newton formulation, adding magic regularisation terms to the diagonal:
 
 $$
 (J^\top J + \lambda^2 I)\,\Delta x = -J^\top F(x_n).
 $$
 
-Intuitively, $\lambda$ stabilises the step and biases the solution toward minimum distance deviation from the
-current state, yielding a minimum-norm solution when degrees of freedom exist.
+This stabilises the step and yields a minimum-norm step when degrees of freedom exist. If we also want to stay near a reference state $x_{\mathrm{ref}}$ (e.g., the initial sketch), we can add an anchor term, giving:
 
-Note that what we're doing here feels very close to [Levenberg-Marquardt](https://en.wikipedia.org/wiki/Levenberg%E2%80%93Marquardt_algorithm).
+$$
+(J^\top J + \lambda^2 I)\,\Delta x = -J^\top F(x_n) - \lambda^2 (x_n - x_{\mathrm{ref}}).
+$$
+
+Note that what we're doing here is closely related to the Levenberg–Marquardt algorithm.
 
 ### Overdetermined case
 
@@ -184,7 +202,7 @@ $$
 \min_x \|F(x)\|_2^2
 $$
 
-Again, this can be solved via the normal equations:
+Again, this can be solved via the Gauss–Newton formulation:
 
 $$
 J^\top J \Delta x = -J^\top F(x_n)
@@ -197,7 +215,7 @@ Many solvers will handle this transition from exactly determined to under or ove
 - Rank estimation and problem state.
 
   - Before solving, we estimate the rank of $J$ (via SVD or QR) to characterise the system.
-    Rank can be used directly to separate underdetermined systems from those which are exactly or overdetermined.
+    Rank (rather than raw counts) can be used to separate underdetermined systems from those which are exactly or overdetermined.
     However, identifying truly overconstrained systems is more complex.
   - See: https://github.com/KittyCAD/ezpz/issues/6#issuecomment-3215292050
 
