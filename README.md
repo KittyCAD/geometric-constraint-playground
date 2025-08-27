@@ -105,7 +105,7 @@ significant use of zeros and structural aspects without requiring us to perform 
 
 The core of the solver currently uses `scipy.optimize.least_squares` with the Trust Region
 Reflective (`trf`) algorithm, because it plays nicely with a sparse Jacobian. Other choices
-(Gauss–Newton, Levenberg–Marquardt, or quasi-Newton) are also viable when they have good sparse
+(Gauss-Newton, Levenberg-Marquardt, or quasi-Newton) are also viable when they have good sparse
 support, but our frame of reference should be Newton's method.
 
 Note that our sparse requirement really originates from how our constraints typically
@@ -158,13 +158,13 @@ Notes:
 - This is an $A x = b$-like solve at each iteration.
 - $F(x)$ is the stacked residual vector (one entry per constraint), not a sum of residuals.
 
-### Notes on Gauss–Newton
+### Notes on Gauss-Newton
 
-Newton's method as described above is suitable for exactly determined systems (locally as many
+Newton's method, as described above, is suitable for systems with square Jacobians of full rank (locally as many
 independent constraints as degrees of freedom). In practice, we often have underdetermined or
 overdetermined systems for which this approach will not work directly.
 
-[Gauss-Newton](https://en.wikipedia.org/wiki/Gauss%E2%80%93Newton_algorithm) is an extension
+[Gauss-Newton](https://en.wikipedia.org/wiki/Gauss%E2%80%93Newton_algorithm) is an extension/approximation
 of Newton's method that can handle these cases by effectively minimising the sum of squared residuals.
 
 The basic idea is to introduce [normal equations](https://mathworld.wolfram.com/NormalEquation.html)
@@ -178,9 +178,11 @@ Becomes:
 
 $$J^\top J \Delta x = -J^\top F(x_n)$$
 
+Note that solvers are often likely to implement this via QR or SVD rather than forming $J^\top J$.
+
 ### Underdetermined case
 
-To handle underdetermined systems, we use Tikhonov regularisation with the Gauss–Newton formulation, adding magic regularisation terms to the diagonal:
+To handle underdetermined systems, we use Tikhonov regularisation with the Gauss-Newton formulation, adding magic regularisation terms to the diagonal:
 
 $$
 (J^\top J + \lambda^2 I)\,\Delta x = -J^\top F(x_n).
@@ -202,7 +204,7 @@ $$
 \min_x \|F(x)\|_2^2
 $$
 
-Again, this can be solved via the Gauss–Newton formulation:
+Again, this can be solved via the Gauss-Newton formulation:
 
 $$
 J^\top J \Delta x = -J^\top F(x_n)
