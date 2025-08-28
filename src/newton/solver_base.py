@@ -274,7 +274,8 @@ class Solver2D(ABC):
             if not system["constraints"]:
                 continue
 
-            free_primitives = self.identify_free_primitives(system["primitives"])
+            # free_primitives = self.identify_free_primitives(system["primitives"])
+            free_primitives = system["primitives"]
             if free_primitives:
                 # Add free_primitives to the system dict for the concrete solver.
                 system["free_primitives"] = free_primitives

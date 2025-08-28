@@ -1,8 +1,9 @@
 # Use symbolic substitution in the solver.
-CONFIG_USE_SYMB_SUB = True
+CONFIG_USE_SYMB_SUB = False
 
 # Use sparse solver for the 2D solver.
 CONFIG_USE_SPARSE_SOLVE = True
+CONFIG_USE_NEWTON_FAER = True
 
 # Generally used to avoid numerical issues in constraint definitions.
 EPS = 1e-9

@@ -322,7 +322,6 @@ class NewtonSolver:
         return x, damping, step_applied
 
 
-# Example nonlinear system for testing
 class SimpleNonlinearSystem:
     def dimension(self) -> int:
         return 2
