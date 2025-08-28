@@ -8,14 +8,15 @@ Adapted and ported to Python with modifications to prove out the approach of a s
 we will eventually actually write in Rust.
 """
 
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Callable, Optional, Protocol, Tuple
+from typing import Callable, Optional, Protocol, Tuple, Union
 
 import numpy as np
 from scipy import sparse
-from scipy.linalg import solve
-from scipy.sparse.linalg import spsolve
+from scipy.linalg import lu_factor, lu_solve
+from scipy.sparse.linalg import splu
 
 
 class MatrixFormat(Enum):
@@ -81,6 +82,86 @@ class SolverError(Exception):
         super().__init__(self.message)
 
 
+class LUSolver(ABC):
+    @abstractmethod
+    def factor(self, matrix: Union[np.ndarray, sparse.csr_matrix]) -> None:
+        """
+        Factor the matrix for later solving.
+        """
+        pass
+
+    @abstractmethod
+    def solve(self, rhs: np.ndarray) -> np.ndarray:
+        """
+        Solve the linear system with the previously factored matrix."""
+        pass
+
+
+class DenseLUSolver(LUSolver):
+    """
+    Dense LU solver using scipy.linalg.lu_factor/lu_solve.
+    """
+
+    def __init__(self):
+        self.lu_factors = None
+        self.pivots = None
+
+    def factor(self, matrix: Union[np.ndarray, sparse.csr_matrix]) -> None:
+        """
+        Factor the dense matrix using LU decomposition.
+        """
+        if isinstance(matrix, sparse.csr_matrix):
+            matrix = matrix.toarray()
+        try:
+            self.lu_factors, self.pivots = lu_factor(matrix)
+        except np.linalg.LinAlgError as e:
+            raise SolverError(f"Dense LU factorization failed: {e}")
+
+    def solve(self, rhs: np.ndarray) -> np.ndarray:
+        """
+        Solve using the factored matrix.
+        """
+        if self.lu_factors is None or self.pivots is None:
+            raise SolverError("Matrix must be factored before solving")
+
+        try:
+            return lu_solve((self.lu_factors, self.pivots), rhs)
+        except np.linalg.LinAlgError as e:
+            raise SolverError(f"Dense LU solve failed: {e}")
+
+
+class SparseLUSolver(LUSolver):
+    """
+    Sparse LU solver using scipy.sparse.linalg.splu.
+    """
+
+    def __init__(self):
+        self._lu_factors = None
+
+    def factor(self, matrix: Union[np.ndarray, sparse.csr_matrix]) -> None:
+        """
+        Factor the sparse matrix using sparse LU decomposition.
+        """
+        if not isinstance(matrix, sparse.csr_matrix):
+            raise TypeError("SparseLUSolver requires a sparse matrix")
+        try:
+            self._lu_factors = splu(matrix.tocsc())
+        except Exception as e:
+            raise SolverError(f"Sparse LU factorization failed: {e}")
+
+    def solve(self, rhs: np.ndarray) -> np.ndarray:
+        """
+        Solve using the factored matrix.
+        """
+        if self._lu_factors is None:
+            raise SolverError("Matrix must be factored before solving")
+
+        try:
+            return self._lu_factors.solve(rhs)
+        except Exception as e:
+            raise SolverError(f"Sparse LU solve failed: {e}")
+
+
 class NonlinearSystem(Protocol):
     """
     Protocol for nonlinear systems that can be solved with Newton's method.
@@ -105,7 +186,7 @@ class NonlinearSystem(Protocol):
 
 class NewtonSolver:
     """
-    Newton-Raphson solver for nonlinear systems.
+    Newton-Raphson solver for nonlinear systems using explicit LU decomposition.
     """
 
     def __init__(self, config: Optional[NewtonConfig] = None):
@@ -147,13 +228,19 @@ class NewtonSolver:
                 f"Initial guess dimension {len(x)} doesn't match system dimension {n}."
             )
 
-        # Determine matrix format.
+        # Determine matrix format and create appropriate solver.
         use_dense = self.should_use_dense(n)
 
         if use_dense:
-            return self.solve_dense(system, x, callback)
+            lu_solver = DenseLUSolver()
+            return self.solve_with_lu_solver(
+                system, x, callback, lu_solver, use_dense=True
+            )
         else:
-            return self.solve_sparse(system, x, callback)
+            lu_solver = SparseLUSolver()
+            return self.solve_with_lu_solver(
+                system, x, callback, lu_solver, use_dense=False
+            )
 
     def should_use_dense(self, n: int) -> bool:
         # Determine whether to use dense or sparse matrices.
@@ -164,17 +251,21 @@ class NewtonSolver:
         else:  # AUTO
             return n < self.config.format_threshold
 
-    def solve_dense(
+    def solve_with_lu_solver(
         self,
         system: NonlinearSystem,
         x: np.ndarray,
         callback: Callable[[IterationStats], Control],
+        lu_solver: LUSolver,
+        use_dense: bool,
     ) -> Tuple[np.ndarray, int]:
         damping = self.config.damping
         last_res = np.inf
+        n = system.dimension()
 
         # Buffers for line search.
         x_trial = np.zeros_like(x)
+        rhs = np.zeros(n)
 
         for iter in range(self.config.max_iter):
             # Compute residual.
@@ -190,65 +281,17 @@ class NewtonSolver:
             if res < self.config.tol:
                 return x, iter + 1
 
-            # Compute Jacobian and solve for Newton step.
-            try:
+            # Compute Jacobian and factor it.
+            if use_dense:
                 jac = system.jacobian_dense(x)
-                dx = solve(jac, -f)
-            except np.linalg.LinAlgError as e:
-                raise SolverError(f"Linear solve failed: {e}")
-
-            # Apply step with adaptive damping and line search.
-            x, damping, step_applied = self._apply_step(
-                system,
-                x,
-                f,
-                dx,
-                damping,
-                last_res,
-                x_trial,
-            )
-
-            if not step_applied and self.config.adaptive:
-                raise SolverError("Divergence guard: line search failed")
-
-            last_res = res
-
-        raise SolverError(
-            f"Newton solver did not converge after {self.config.max_iter} iterations"
-        )
-
-    def solve_sparse(
-        self,
-        system: NonlinearSystem,
-        x: np.ndarray,
-        callback: Callable[[IterationStats], Control],
-    ) -> Tuple[np.ndarray, int]:
-        damping = self.config.damping
-        last_res = np.inf
-
-        # Buffers for line search.
-        x_trial = np.zeros_like(x)
-
-        for iter in range(self.config.max_iter):
-            # Compute residual.
-            f = system.residual(x)
-            res = np.max(np.abs(f))
-
-            # Call callback.
-            stats = IterationStats(iter=iter, residual=res, damping=damping)
-            if callback(stats) == Control.CANCEL:
-                raise SolverError("Solve cancelled by callback")
-
-            # Check convergence.
-            if res < self.config.tol:
-                return x, iter + 1
-
-            # Compute sparse Jacobian and solve for Newton step.
-            try:
+            else:
                 jac = system.jacobian_sparse(x)
-                dx = spsolve(jac, -f)
-            except Exception as e:
-                raise SolverError(f"Sparse linear solve failed: {e}")
+
+            lu_solver.factor(jac)
+
+            # Prepare RHS and solve for Newton step.
+            rhs[:] = -f
+            dx = lu_solver.solve(rhs)
 
             # Apply step with adaptive damping and line search.
             x, damping, step_applied = self._apply_step(
