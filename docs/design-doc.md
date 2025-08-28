@@ -490,8 +490,7 @@ At a high level, the system's objective is to:
 1. Translate a set of user-defined geometric and dimensional constraints into a single system of equations.
 2. Find a set of values for the relevant variables (e.g., point coordinates, arc radii) that satisfies these equations simultaneously.
 
-Practically, each constraint is converted into one or more residual functions, where that residual function measures how close the given constraint is to being satisfied.
-Broadly speaking, the solver then works by gathering this set of residuals into an equation of the form:
+Practically, each constraint is converted into one or more residual functions, where that residual function measures how close the given constraint is to being satisfied. Broadly speaking, the solver then works by gathering this set of residuals into an equation of the form:
 
 ```math
 \mathbf{F}(\mathbf{x}) = \mathbf{0}
@@ -524,39 +523,51 @@ Before running the numerical solve, the system of constraints may be possible to
 
 The constraint graph (where primitives are nodes and constraints are edges) can often be broken down into several smaller, wholly independent sub-problems. This is equivalent to finding the connected components of the graph. Solving several small systems independently is significantly more efficient than solving one large, combined system. See: https://github.com/KittyCAD/geometric-constraint-playground/blob/a143aa4fdd6c01c5017ac6836c5c7f0c251b5fda/src/newton/solver_base.py#L85C9-L85C34
 
+While more advanced decomposition techniques (e.g., Dulmage–Mendelsohn or block triangular decomposition) can identify quasi-independent subsystems, I'm led to believe sparse solvers are effective at exploiting the inherent sparsity and partial decoupling within a single connected system. Therefore, the primary decomposition step is to separate the problem into its fully disconnected components.
+
 #### 5.2.2 Symbolic Substitution
 
 Some constraints (e.g., two points being coincident) can be used to eliminate variables entirely. If point P2 is constrained to be coincident with P1, all references to P2's coordinates in other constraints can be symbolically replaced with P1's coordinates. This reduces the number of variables (n) in the system, shrinking the Jacobian and further accelerating the numerical solve.
 
 ### 5.3 Numerical Solve
 
-After pre-processing, the simplified system(s) of equations are passed to an iterative numerical solver, likely a sparse Newton method.
+After pre-processing, the simplified system(s) of equations are passed to an iterative numerical solver, likely a sparse Newton method. At each iteration, the solver computes an update step $\Delta x$ by solving the linear system $J \Delta x = -F(x_n)$.
 
-### 5.3.1 Solver States & Solve Paths
+### 5.3.1 System Classification and Solution Strategies
 
-The system of equations representing the sketch can take one of three states, which can be determined from the rank of the Jacobian ($J$) in relation to the number of equations ($m$) and variables ($n$).
+The constraint system can be classified by analyzing the Jacobian matrix $J$ at the current state, where $J$ has dimensions $m × n$ ($m$ constraint equations, $n$ variables). The system's solvability depends on both the rank of $J$ and the consistency of the constraint equations.
 
-- Under-defined, or [underdetermined](https://en.wikipedia.org/wiki/Underdetermined_system).
+**Classification based on Jacobian analysis:**
 
-  - **Condition:** $rank(J) < n$
-  - **Meaning:** The number of independent constraints is less than the number of variables. This is the typical mid-sketch state where the geometry has degrees of freedom and can be dragged.
-  - **Solve Path:** An infinite number of solutions exist. The solver's goal is to select one in a predictable way, typically the one representing a 'minimum change' from the current state (a minimum-norm solution). This is achieved using methods like:
-    - Moore-Penrose pseudoinverse.
-    - **Tikhonov regularization**, which ensures the underlying matrix is invertible and finds the minimum-norm solution.
-    - Penalty methods, as reported by Solvespace.[^8]
+- **Under-constrained (Underdetermined)**
+- **Condition:** $rank(J) < n$
+- **Meaning:** Fewer independent constraints than variables. The system has degrees of freedom.
+- **Solution Strategy:** Use regularised methods (e.g., Tikhonov regularisation) to find the minimum-norm solution that represents the smallest change from the current state. This preserves the system's draggable behavior during sketch construction.
 
-- Fully defined, or fully determined.
+- **Well-constrained**
+- **Condition:** $rank(J) = n$ and the system converges to $\lVert F(x*)\lVert \approx 0$
+- **Meaning:** The number of independent constraints matches the variables, and the constraints are mutually consistent.
+- **Solution Strategy:** Standard Newton-type methods can find the unique solution $x*$.
 
-  - **Condition:** $rank(J) = n$
-  - **Meaning:** The number of independent constraints is equal to the number of variables. This is the 'happy path' where the sketch has no remaining degrees of freedom. So long as the constraints are consistent, a single, unique solution exists. Note that this can occur even if `m > n`, if the extra constraints are redundant but not conflicting.
-  - **Solve Path:** A standard Newton's method (or a quasi-Newton variant where no analytical Jacobian is required) is used to iterate until the error $\lVert F(\textbf{x}) \rVert < tol$.
+- **Over-constrained**
+- **Condition:** $rank(J) = n$ but the system fails to converge to $\lVert F(x*)\lVert \approx 0$ (residual remains large)
+- **Meaning:** The constraints are inconsistent—they cannot all be satisfied simultaneously.
+- **Solution Strategy:** Report constraint conflict to the user. The system should identify and highlight the conflicting constraints rather than attempting a least-squares approximation.
 
-- Over-defined, or [overdetermined](https://en.wikipedia.org/wiki/Overdetermined_system).
-  - **Condition:** The system of equations is _inconsistent_. This typically occurs when $m > n$ and the constraints are conflicting.
-  - **Meaning:** There are more independent constraints than variables, and they cannot all be satisfied simultaneously (e.g., a line is constrained to be both 5 units and 10 units long). There is no exact solution.
-  - **Solve Path:** This is the 'overconstrained' error state. Most CAD systems will "blow up" and report an error. A robust solver should detect this inconsistency and notify the user, ideally highlighting the set of conflicting constraints.
-    - Onshape's use of 'driven dimensions' is a nice feature that avoids this failure state by treating the last-added constraint as purely annotative.
-    - While numerical methods can find a "best fit" least-squares solution that minimises the unavoidable error, for a CAD sketcher, explicitly flagging the conflict to the user is the preferred behavior.
+**Implementation notes:**
+
+Rank estimation can be performed using QR decomposition or SVD. For numerical stability, use a tolerance-based rank calculation rather than exact zero comparisons.
+
+The distinction between well-constrained and over-constrained systems cannot be determined purely from Jacobian analysis; it requires attempting the solve and examining both convergence behavior and final residual magnitude. A system that appears well-constrained locally (full rank Jacobian) may still be globally inconsistent due to the nonlinear nature of geometric constraints.
+
+**Practical detection strategy:**
+
+1. Compute `rank(J)` to identify under-constrained systems immediately
+2. For systems with `rank(J) = n`, attempt the numerical solve
+3. Classify as well-constrained if convergence achieves `||F(x*)|| < tolerance`
+4. Classify as over-constrained if convergence fails or final residual exceeds tolerance,
+
+This approach acknowledges that constraint consistency in nonlinear systems can only be definitively determined through the solving process itself.
 
 ---
 
@@ -566,24 +577,19 @@ As an aside, my mental model for these things is basically that in an $Ax=b$ cas
 - Fully determined when $m = n$; equal numbers of equations and unknowns.
 - Overdetermined when $m > n$; more equations than unknowns.
 
-However, it should be noted that this doesn't hold up—because we are interested in the linearly independent components, as are revelead by the matrix's rank.
+However, it should be noted that this doesn't hold up—because we are interested in the linearly independent components, as are revealed by the matrix's rank.
 
 ### 5.3.2 Tikhonov Regularisation
 
-For the underdetermined systems case, where there are more variables than linearly independent constraints, there are infinitely many possible solutions.
+For the underdetermined systems case, where there are infinitely many possible solutions, we need a stable way to choose one. The standard Newton step $J \\Delta x = -F(x)$ is ill-posed. Instead, we solve the corresponding linear least-squares problem using the normal equations, which for underdetermined systems must be regularised.
 
-The underlying linear solve at each step is analogous to solving the normal equation $(J^T J)\delta x = -J^T r$, where $r$ is our error/residual vector. To handle underdetermined systems, we can use Tikhonov regularisation, which
-modifies the equation to $(J^T J + \lambda^2 I)\delta x = -J^T r$.
-
-The $\lambda^2 I$ term is a positive diagonal matrix that ensures the combined matrix is invertible and stabilises the solution. This pushes the solver toward a solution that has a minimal deviation from its initial state, effectively finding the 'closest' (minimum-norm) valid solution (wrt. initial positions) when degrees of freedom exist.
+Tikhonov regularisation modifies the equation to $(J^T J + \\lambda^2 I)\\delta x = -J^T r$, where $r$ is the residual vector $F(x_n)$. The $\\lambda^2 I$ term is a small diagonal matrix that ensures the system is invertible and stable. This pushes the solver toward a solution that has a minimal deviation from its initial state, effectively finding the 'closest' (minimum-norm) valid solution when degrees of freedom exist.
 
 ### 5.4 Recommended Solver Approach: Sparse Newton's Method
 
-Given the nature of geometric constraint problems, where any given constraint typically only involves a small subset of the total variables, the resulting Jacobian matrix is likely to be very sparse. This sparsity is a critical feature to exploit for performance.
+Given the nature of geometric constraint problems, where any given constraint typically only involves a small subset of the total variables, the resulting Jacobian matrix is very sparse. This sparsity is a critical feature to exploit for performance.
 
-A dense solver would waste significant computation on zero-value entries, whereas a sparse solver will only operate on the non-zero elements.
-
-While methods like Gauss-Newton or Levenberg-Marquardt are effective, a **sparse Newton's method** approach is recommended. I am led to believe that modern sparse implementations of these algorithms are well-suited to the structure of geometric constraint problems.
+A dense solver would waste significant computation on zero-value entries, whereas a sparse solver will only operate on the non-zero elements. Therefore, a **sparse Newton's method** approach (or a related algorithm like Trust Region Reflective, which handles sparse Jacobians) is recommended. Modern sparse implementations of these algorithms are well-suited to the structure of geometric constraint problems.
 
 ### 5.5 Notes on Third Party Solvers
 
