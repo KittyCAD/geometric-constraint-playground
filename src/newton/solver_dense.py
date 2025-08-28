@@ -5,7 +5,7 @@
 #   shapes.
 
 import logging
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -21,7 +21,9 @@ from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 
 class Solver2DDense(Solver2D):
-    def __init__(self, primitives: List[Primitive], constraints: List[Constraint]):
+    def __init__(
+        self, primitives: Sequence[Primitive], constraints: Sequence[Constraint]
+    ):
         super().__init__(primitives, constraints)
 
         # Handle backend setup.
@@ -43,45 +45,40 @@ class Solver2DDense(Solver2D):
             f"Solving independently soluble system: {[p.id for p in free_primitives]}"
         )
 
-        # Create an ordered list of all variables we can solve for.
-        free_var_ids = [
-            var_id
-            for p in free_primitives
-            for var_id in p.get_variable_ids()
-            if var_id not in substitution_map
-        ]
+        # Determine the true independent variables for the solver.
+        # These are the variables from free primitives that are _not_ substituted by another variable.
+        independent_vars = self.get_independent_variables(free_primitives)
 
-        # Build the initial guess array based on this ordered list.
-        all_initial_values: Dict[str, float] = {}
-        for p in self.primitives:
-            all_initial_values.update(p.get_initial_variable_values())
+        if not independent_vars:
+            logger.info(
+                "System is fully constrained by substitutions, nothing to solve."
+            )
+            return
+
+        # Use the consolidated method from the base class.
+        initial_values = self.get_initial_values_for_all_variables()
 
         # Build the initial guess array by looking up the free variables.
         initial_guess = np.array(
-            [all_initial_values[var_id] for var_id in free_var_ids]
+            [initial_values[var_id] for var_id in independent_vars]
         )
         jnp_initial_guess = jnp.asarray(initial_guess)
 
-        def build_variable_values_map(
-            free_vars: jnp.ndarray, initial_values: Dict[str, float]
-        ) -> Mapping[str, Any]:
-            # The values in solved_vars are JAX tracers, which behave like floats
-            # during JIT compilation.
-            solved_vars = {
-                var_id: free_vars[i] for i, var_id in enumerate(free_var_ids)
-            }
-
-            # Unpack the solved variables into the initial values map.
-            return {**initial_values, **solved_vars}
-
-        def residuals_vector(free_vars: jnp.ndarray) -> jnp.ndarray:
-            variable_values = build_variable_values_map(free_vars, all_initial_values)
+        def residuals_vector(independent_vars_values: jnp.ndarray) -> jnp.ndarray:
+            variable_values = self.build_variable_values_map(
+                independent_vars_values,
+                independent_vars,
+                initial_values,
+                substitution_map,
+            )
 
             constraint_residuals = jnp.concatenate(
                 [c.get_residual(variable_values) for c in constraints]
             )
 
-            reg_residuals = REGULARIZATION_LAMBDA * (free_vars - jnp_initial_guess)
+            reg_residuals = REGULARIZATION_LAMBDA * (
+                independent_vars_values - jnp_initial_guess
+            )
             residuals = jnp.concatenate([constraint_residuals, reg_residuals])
             return residuals
 
@@ -94,19 +91,18 @@ class Solver2DDense(Solver2D):
         if jacobian_init.shape is None:
             raise ValueError("Jacobian is empty or not properly initialized.")
 
-        # Because of our Tikhonov regularization, we need to adjust the number of equations.
-        # We effectively vertically concatenate the actual Jacobian with another matrix of the
-        # size (REG_LAMBDA * I), which adds n_variables more rows.
-        n_variables = jacobian_init.shape[1]
-        # n_equations = jacobian_init.shape[0]
+        # The number of variables is the number of independent variables we are solving for.
+        n_variables_independent = len(independent_vars)
         n_geom_equations = sum(c.n_residual_rows for c in constraints)
 
-        self.check_system_state(jacobian_init, n_variables, n_geom_equations)
+        self.check_system_state(
+            jacobian_init, n_variables_independent, n_geom_equations
+        )
 
         # The per-iteration rank check is still useful for diagnostics.
         # Define a function that can be used for debugging if needed
-        def get_jacobian_with_rank(free_vars: jnp.ndarray) -> jnp.ndarray:
-            jacobian = jit_jacobian(free_vars)
+        def get_jacobian_with_rank(independent_vars_values: jnp.ndarray) -> jnp.ndarray:
+            jacobian = jit_jacobian(independent_vars_values)
             s_values = jnp.linalg.svd(jacobian, compute_uv=False)
             current_rank = jnp.sum(s_values > NONZERO_RANK_TOLERANCE)
             is_deficient = current_rank < jacobian.shape[1]
@@ -132,9 +128,9 @@ class Solver2DDense(Solver2D):
             verbose=2 if logger.isEnabledFor(logging.DEBUG) else 0,
         )
 
-        # Run checks and update.
-        final_variable_values = self.compute_final_variable_values(
-            result, free_primitives, substitution_map
+        # Run checks and update using the consolidated method from the base class.
+        final_variable_values = self.fan_out_solved_variable_values(
+            result, independent_vars, substitution_map
         )
         self.update_primitives_from_map(final_variable_values)
         self.assess_solver_result(final_variable_values, constraints)

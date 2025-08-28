@@ -8,10 +8,10 @@
             "program": "${file}",
             "console": "integratedTerminal",
             "args": [],
-            "env": {
-                "PYTHONPATH": "src",
-                // "PYTHONHASHSEED": "0"
-            }
+            // "env": {
+            //     "PYTHONPATH": "src",
+            //     // "PYTHONHASHSEED": "0"
+            // }
         },
     ]
 }

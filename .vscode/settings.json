@@ -25,5 +25,10 @@
         "plaintext": true,
         "markdown": true,
         "scminput": false
-    }
+    },
+    "python.testing.pytestArgs": [
+        "src/tests"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.envFile": "${workspaceFolder}/.env"
 }
