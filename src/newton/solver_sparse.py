@@ -1,21 +1,131 @@
 import logging
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Mapping, Sequence
 
 import numpy as np
+from scipy import sparse
 from scipy.optimize import least_squares
-from scipy.sparse import csc_matrix, diags, lil_matrix, vstack
+from scipy.sparse import csc_matrix, csr_matrix, diags, lil_matrix, vstack
 
 import newton.backend as nb
-from newton.constants import REGULARIZATION_LAMBDA
+from newton.constants import (
+    CONFIG_USE_NEWTON_FAER,
+    CONFIG_USE_REGULARIZATION,
+    REGULARIZATION_LAMBDA,
+)
 from newton.constraints import Constraint
 from newton.logging_config import logger
+from newton.ports import newton_faer
+from newton.ports.newton_faer import (
+    NewtonConfig,
+    NewtonSolver,
+    NonlinearSystem,
+)
 from newton.primitives import Primitive
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 from newton.symbolic_substitution import find
 
 
+class ConstraintSystemAdapter(NonlinearSystem):
+    """
+    Adapter to make the constraint system compatible with NewtonSolver.
+    """
+
+    def __init__(
+        self,
+        constraints: List[Constraint],
+        independent_vars: List[str],
+        var_map: Dict[str, int],
+        initial_values: Dict[str, float],
+        substitution_map: Dict[str, str],
+        solver_instance: "Solver2DSparse",
+    ):
+        self.constraints = constraints
+        self.independent_vars = independent_vars
+        self.var_map = var_map
+        self.initial_values = initial_values
+        self.substitution_map = substitution_map
+        self.solver_instance = solver_instance
+
+    @property
+    def n_variables(self) -> int:
+        return len(self.independent_vars)
+
+    @property
+    def n_residuals(self) -> int:
+        # Count constraint residuals.
+        n_residuals = sum(c.n_residual_rows for c in self.constraints)
+
+        if CONFIG_USE_REGULARIZATION:
+            # Add regularization terms (one per variable).
+            n_regularization_residuals = len(self.independent_vars)
+            n_residuals += n_regularization_residuals
+
+        return n_residuals
+
+    def residual(self, x: np.ndarray) -> np.ndarray:
+        """
+        Compute residual vector for the constraint system with Tikhonov regularization.
+        """
+        variable_values = self.solver_instance.build_variable_values_map(
+            x,
+            self.independent_vars,
+            self.initial_values,
+            self.substitution_map,
+        )
+
+        # Get constraint residuals
+        constraint_residuals = np.concatenate(
+            [c.get_residual(variable_values) for c in self.constraints]
+        )
+
+        if CONFIG_USE_REGULARIZATION:
+            # Add Tikhonov regularization term: lambda * (x - x0).
+            initial_guess = np.array(
+                [self.initial_values[var_id] for var_id in self.independent_vars]
+            )
+            reg_residuals = REGULARIZATION_LAMBDA * (x - initial_guess)
+
+            return np.concatenate([constraint_residuals, reg_residuals])
+
+        else:
+            return constraint_residuals
+
+    def jacobian_sparse(self, x: np.ndarray) -> sparse.csr_matrix:
+        variable_values = self.solver_instance.build_variable_values_map(
+            x,
+            self.independent_vars,
+            self.initial_values,
+            self.substitution_map,
+        )
+
+        # Build the sparse jacobian using existing method.
+        system_dict = {
+            "constraints": self.constraints,
+            "substitution_map": self.substitution_map,
+        }
+
+        jacobian = self.solver_instance.build_sparse_jacobian(
+            system_dict, self.var_map, variable_values
+        )
+
+        # Combine them vertically into the augmented Jacobian
+        if CONFIG_USE_REGULARIZATION:
+            # Add regularization Jacobian (lambda * I) to match scipy behavior.
+            n_vars = len(self.independent_vars)
+            reg_jacobian = diags([REGULARIZATION_LAMBDA] * n_vars, format="csc")
+            augmented_jacobian = vstack([jacobian, reg_jacobian], format="csc")
+            return csr_matrix(augmented_jacobian)
+        else:
+            return csr_matrix(jacobian)
+
+    def jacobian_dense(self, x: np.ndarray) -> np.ndarray:
+        return self.jacobian_sparse(x).toarray()
+
+
 class Solver2DSparse(Solver2D):
-    def __init__(self, primitives: List[Primitive], constraints: List[Constraint]):
+    def __init__(
+        self, primitives: Sequence[Primitive], constraints: Sequence[Constraint]
+    ):
         super().__init__(primitives, constraints)
 
         # Handle backend setup.
@@ -53,12 +163,9 @@ class Solver2DSparse(Solver2D):
 
             i_row += constraint.n_residual_rows
 
-        logger.debug("Jacobian:\n%s", jacobian.toarray())
-
         return jacobian.tocsc()
 
     def solve_constraint_system(self, system: Dict[str, Any]):
-        """Solve using sparse matrix methods."""
         free_primitives: List[Primitive] = system["free_primitives"]
         constraints: List[Constraint] = system["constraints"]
         substitution_map: Dict[str, str] = system["substitution_map"]
@@ -82,42 +189,103 @@ class Solver2DSparse(Solver2D):
             return
 
         var_map = {var_id: i for i, var_id in enumerate(independent_vars)}
-        initial_values: Dict[str, float] = {}
 
-        for p in self.primitives:
-            initial_values.update(p.get_initial_variable_values())
-
+        # Use the consolidated method from base class.
+        initial_values = self.get_initial_values_for_all_variables()
         initial_guess = np.array(
             [initial_values[var_id] for var_id in independent_vars]
         )
 
-        def build_variable_values_map(
-            independent_vars_values: np.ndarray,
-        ) -> Mapping[str, float]:
-            # Builds the flat map of all variable IDs to their current values.
-            # This is the single source of truth passed to the constraints.
+        if CONFIG_USE_NEWTON_FAER:
+            result = self.solve_with_newton_faer(
+                constraints,
+                independent_vars,
+                var_map,
+                initial_values,
+                substitution_map,
+                initial_guess,
+            )
+        else:
+            # Use the original scipy least_squares method.
+            result = self.solve_with_scipy(
+                constraints,
+                independent_vars,
+                initial_guess,
+                initial_values,
+                substitution_map,
+            )
 
-            # Start with the initial state of all variables in the system.
-            variable_values = dict(initial_values)
+        # Run checks and update using the consolidated method from the base class.
+        # This effectively fans out the final variable values through the substitution map.
+        final_variable_values = self.fan_out_solved_variable_values(
+            result, independent_vars, substitution_map
+        )
+        self.update_primitives_from_map(final_variable_values)
+        self.assess_solver_result(final_variable_values, constraints)
+        return
 
-            # Create a dictionary of the variables the solver is currently optimizing.
-            solved_vars = {
-                var_id: independent_vars_values[i]
-                for i, var_id in enumerate(independent_vars)
-            }
+    def solve_with_newton_faer(
+        self,
+        constraints: List[Constraint],
+        independent_vars: List[str],
+        var_map: Dict[str, int],
+        initial_values: Dict[str, float],
+        substitution_map: Dict[str, str],
+        initial_guess: np.ndarray,
+    ):
+        # Create the system adapter.
+        constraint_system = ConstraintSystemAdapter(
+            constraints=constraints,
+            independent_vars=independent_vars,
+            var_map=var_map,
+            initial_values=initial_values,
+            substitution_map=substitution_map,
+            solver_instance=self,
+        )
 
-            # Overwrite the initial values with the current solved values.
-            variable_values.update(solved_vars)
+        # Configure the Newton solver and sovle.
+        newton_config = NewtonConfig(
+            tol=SOLVER_CONVERGENCE_TOLERANCE,
+            max_iter=50,
+            format=newton_faer.MatrixFormat.SPARSE,
+            adaptive=True,
+            damping=1.0,
+        )
 
-            # More sub mop up.
-            for var_id, root_id in substitution_map.items():
-                if root_id in variable_values:
-                    variable_values[var_id] = variable_values[root_id]
+        newton_solver = NewtonSolver(newton_config)
+        solution, iterations = newton_solver.solve(
+            constraint_system,
+            initial_guess,
+        )
 
-            return variable_values
+        logger.debug(f"Newton-Faer converged in {iterations} iterations")
+
+        # Create a result-like object for compatibility with existing code.
+        from scipy.optimize import OptimizeResult
+
+        result = OptimizeResult(
+            x=solution, success=True, fun=constraint_system.residual(solution)
+        )
+        return result
+
+    def solve_with_scipy(
+        self,
+        constraints: List[Constraint],
+        independent_vars: List[str],
+        initial_guess: np.ndarray,
+        initial_values: Dict[str, float],
+        substitution_map: Dict[str, str],
+    ):
+        var_map = {var_id: i for i, var_id in enumerate(independent_vars)}
 
         def residuals_vector(independent_vars_values: np.ndarray) -> np.ndarray:
-            variable_values = build_variable_values_map(independent_vars_values)
+            variable_values = self.build_variable_values_map(
+                independent_vars_values,
+                independent_vars,
+                initial_values,
+                substitution_map,
+            )
+
             constraint_residuals = np.concatenate(
                 [c.get_residual(variable_values) for c in constraints]
             )
@@ -127,11 +295,19 @@ class Solver2DSparse(Solver2D):
             return np.concatenate([constraint_residuals, reg_residuals])
 
         def jacobian_wrapper(independent_vars_values: np.ndarray) -> csc_matrix:
-            # Use the new generic helper function.
-            variable_values = build_variable_values_map(independent_vars_values)
+            variable_values = self.build_variable_values_map(
+                independent_vars_values,
+                independent_vars,
+                initial_values,
+                substitution_map,
+            )
 
             # Original constraint Jacobian.
-            jacobian = self.build_sparse_jacobian(system, var_map, variable_values)
+            system_dict = {
+                "constraints": constraints,
+                "substitution_map": substitution_map,
+            }
+            jacobian = self.build_sparse_jacobian(system_dict, var_map, variable_values)
 
             # Regularization Jacobian (lambda * I).
             n_vars = len(independent_vars)
@@ -173,10 +349,4 @@ class Solver2DSparse(Solver2D):
             verbose=2 if logger.isEnabledFor(logging.DEBUG) else 0,
         )
 
-        # Run checks and update.
-        final_variable_values = self.compute_final_variable_values(
-            result, independent_vars, substitution_map
-        )
-        self.update_primitives_from_map(final_variable_values)
-        self.assess_solver_result(final_variable_values, constraints)
-        return
+        return result

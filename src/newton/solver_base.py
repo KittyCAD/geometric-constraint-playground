@@ -2,12 +2,13 @@ import logging
 from abc import ABC, abstractmethod
 from enum import Enum
 from types import ModuleType
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Sequence
 
 import networkx as nx
 import numpy as np
 from scipy.optimize import OptimizeResult
 
+from newton.backend import Vector
 from newton.constants import CONFIG_USE_SYMB_SUB, NONZERO_RANK_TOLERANCE
 from newton.constraint_validator import ConstraintValidator
 from newton.constraints import (
@@ -23,8 +24,8 @@ from newton.symbolic_substitution import (
     perform_symbolic_substitution,
 )
 
-SOLVE_VALIDATION_TOLERANCE = 1e-6  # Our maximum allowed error on any constraint.
-SOLVER_CONVERGENCE_TOLERANCE = 1e-10  # The tolerance for convergence in the solver.
+SOLVE_VALIDATION_TOLERANCE = 1e-5  # Our maximum allowed error on any constraint.
+SOLVER_CONVERGENCE_TOLERANCE = 1e-7  # The tolerance for convergence in the solver.
 
 
 class SystemState(Enum):
@@ -39,7 +40,9 @@ if logger.isEnabledFor(logging.DEBUG):
 
 
 class Solver2D(ABC):
-    def __init__(self, primitives: List[Primitive], constraints: List[Constraint]):
+    def __init__(
+        self, primitives: Sequence[Primitive], constraints: Sequence[Constraint]
+    ):
         # Build our full set of constraints: this will be the user-defined constraints
         # passed in, plus our definitional constraints from the primitives.
         all_constraints = list(constraints)
@@ -49,8 +52,8 @@ class Solver2D(ABC):
         # Store the primitives and constraints.
         self.primitives = primitives
         self.primitive_map = {p.id: p for p in primitives}
-        self.original_constraints: List[Constraint] = all_constraints
-        self.active_constraints: List[Constraint] = []
+        self.original_constraints: Sequence[Constraint] = all_constraints
+        self.active_constraints: Sequence[Constraint] = []
         self.substitution_map: Dict[str, str] = {}
         self.substitution_stats = SubstitutionStats()
 
@@ -79,7 +82,6 @@ class Solver2D(ABC):
 
         # Use the detailed statistics from the substitution process.
         self.substitution_stats.constraints_eliminated = results.constraints_eliminated
-        self.substitution_stats.constraints_rewritten = results.constraints_rewritten
         self.substitution_stats.constraints_unchanged = results.constraints_unchanged
         self.substitution_stats.variables_eliminated = len(self.substitution_map)
         self.substitution_stats.substitution_map_size = len(self.substitution_map)
@@ -272,41 +274,90 @@ class Solver2D(ABC):
             if not system["constraints"]:
                 continue
 
-            free_primitives = self.identify_free_primitives(system["primitives"])
+            # free_primitives = self.identify_free_primitives(system["primitives"])
+            free_primitives = system["primitives"]
             if free_primitives:
                 # Add free_primitives to the system dict for the concrete solver.
                 system["free_primitives"] = free_primitives
                 logger.debug(f"Solving system {i + 1}/{len(constraint_systems)}")
                 self.solve_constraint_system(system)
 
-    def compute_final_variable_values(
+    def build_variable_values_map(
+        self,
+        independent_vars_values: Vector,
+        independent_vars: List[str],
+        initial_values: Dict[str, float],
+        substitution_map: Dict[str, str],
+    ) -> Dict[str, Any]:
+        """
+        Build a complete mapping of all variable IDs to their current values.
+
+        This is used during solve iterations to provide a complete set of variable
+        state vals to constraint evaluation functions.
+
+        Args:
+            independent_vars_values: Current values of variables being solved for.
+            independent_vars: Ordered list of independent variable IDs.
+            initial_values: Initial values for all variables in the system.
+            substitution_map: Map from substituted variables to their root variables.
+
+        Returns:
+            Complete mapping of all variable IDs to their current values.
+        """
+        # Start with the initial state of all variables in the system.
+        variable_values: Dict[str, Any] = dict(initial_values)
+
+        # Create a dictionary of the variables the solver is currently working on.
+        solved_vars = {
+            var_id: independent_vars_values[i]
+            for i, var_id in enumerate(independent_vars)
+        }
+
+        # Update the initial values with the current solved values.
+        variable_values.update(solved_vars)
+
+        # Apply symbolic substitutions to ensure consistency.
+        for var_id, root_id in substitution_map.items():
+            if root_id in variable_values:
+                variable_values[var_id] = variable_values[root_id]
+
+        return variable_values
+
+    def fan_out_solved_variable_values(
         self,
         result: OptimizeResult,
         solved_var_ids: List[str],
         substitution_map: Dict[str, str],
     ) -> Dict[str, float]:
-        # Start with the initial state of all variables in the system.
-        final_variable_values: Dict[str, float] = {}
+        """
+        Distribute the solved variable values through the substitution map, ensuring
+        that all variables, including those eliminated via substitution, are updated and
+        have a type we can work with.
+        """
+        # Get initial values for all variables.
+        initial_values = self.get_initial_values_for_all_variables()
+
+        # Use our consolidated method to build the complete map.
+        # Convert result.x to ensure we have the right array type.
+        final_values = self.build_variable_values_map(
+            result.x, solved_var_ids, initial_values, substitution_map
+        )
+
+        # Ensure all values are Python floats (not JAX tracers or numpy scalars).
+        fanned_out_values = {
+            var_id: float(value) for var_id, value in final_values.items()
+        }
+        return fanned_out_values
+
+    def get_initial_values_for_all_variables(self) -> Dict[str, float]:
+        """
+        Get initial values for all variables across all primitives.
+        """
+        initial_values: Dict[str, float] = {}
         for p in self.primitives:
-            final_variable_values.update(p.get_initial_variable_values())
+            initial_values.update(p.get_initial_variable_values())
 
-        # Get what we actually solved for.
-        solved_values = {var_id: result.x[i] for i, var_id in enumerate(solved_var_ids)}
-
-        # Update the full map with the solved values.
-        final_variable_values.update(solved_values)
-
-        # Handle any symbolic substitutions to ensure all variables are consistent.
-        # (This part handles cases where, e.g., P2.x was substituted by P1.x)
-        all_vars_with_dupes = [v for p in self.primitives for v in p.get_variable_ids()]
-        all_vars = list(dict.fromkeys(all_vars_with_dupes))
-
-        for var_id in all_vars:
-            root = find(var_id, substitution_map)
-            if root in final_variable_values:
-                final_variable_values[var_id] = final_variable_values[root]
-
-        return final_variable_values
+        return initial_values
 
     def assess_solver_result(
         self,

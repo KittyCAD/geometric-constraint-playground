@@ -5,7 +5,7 @@
 #   shapes.
 
 import logging
-from typing import Any, Dict, List, Mapping
+from typing import Any, Dict, List, Sequence
 
 import jax
 import jax.numpy as jnp
@@ -21,7 +21,9 @@ from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 
 
 class Solver2DDense(Solver2D):
-    def __init__(self, primitives: List[Primitive], constraints: List[Constraint]):
+    def __init__(
+        self, primitives: Sequence[Primitive], constraints: Sequence[Constraint]
+    ):
         super().__init__(primitives, constraints)
 
         # Handle backend setup.
@@ -53,10 +55,8 @@ class Solver2DDense(Solver2D):
             )
             return
 
-        # Build the initial guess array based on this ordered list.
-        initial_values: Dict[str, float] = {}
-        for p in self.primitives:
-            initial_values.update(p.get_initial_variable_values())
+        # Use the consolidated method from the base class.
+        initial_values = self.get_initial_values_for_all_variables()
 
         # Build the initial guess array by looking up the free variables.
         initial_guess = np.array(
@@ -64,28 +64,13 @@ class Solver2DDense(Solver2D):
         )
         jnp_initial_guess = jnp.asarray(initial_guess)
 
-        def build_variable_values_map(
-            independent_vars_values: jnp.ndarray,
-        ) -> Mapping[str, Any]:
-            # The values in solved_vars are JAX tracers, which behave like floats
-            # during JIT compilation.
-            solved_vars = {
-                var_id: independent_vars_values[i]
-                for i, var_id in enumerate(independent_vars)
-            }
-
-            # Unpack the solved variables into the initial values map.
-            variable_values = {**initial_values, **solved_vars}
-
-            # Apply substitutions dynamically.
-            for var_id, root_id in substitution_map.items():
-                if root_id in variable_values:
-                    variable_values[var_id] = variable_values[root_id]
-
-            return variable_values
-
         def residuals_vector(independent_vars_values: jnp.ndarray) -> jnp.ndarray:
-            variable_values = build_variable_values_map(independent_vars_values)
+            variable_values = self.build_variable_values_map(
+                independent_vars_values,
+                independent_vars,
+                initial_values,
+                substitution_map,
+            )
 
             constraint_residuals = jnp.concatenate(
                 [c.get_residual(variable_values) for c in constraints]
@@ -143,9 +128,8 @@ class Solver2DDense(Solver2D):
             verbose=2 if logger.isEnabledFor(logging.DEBUG) else 0,
         )
 
-        # Run checks and update.
-        # Pass the list of variables that were actually solved for.
-        final_variable_values = self.compute_final_variable_values(
+        # Run checks and update using the consolidated method from the base class.
+        final_variable_values = self.fan_out_solved_variable_values(
             result, independent_vars, substitution_map
         )
         self.update_primitives_from_map(final_variable_values)

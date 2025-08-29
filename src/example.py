@@ -15,6 +15,7 @@ from newton.constraints import (
     LineLineDistance,
     LinesEqualLength,
     LinesParallel,
+    LinesPerpendicular,
     LineTangentToCircle,
     LineVertical,
     PointFixed,
@@ -28,7 +29,7 @@ from newton.primitives import Circle, CircularArc, Line, Point, Primitive
 from newton.solver_dense import Solver2DDense
 from newton.solver_sparse import Solver2DSparse
 
-configure_logging(level=logging.INFO)
+configure_logging(level=logging.DEBUG)
 
 PLOT = True
 
@@ -300,10 +301,10 @@ def constrain_underdetermined():
         PointFixed(point=p0),
         PointPointXDistance(p0, p1, distance=4),
         PointPointYDistance(p0, p1, distance=4),
-        PointPointEuclideanDistance(p1, p2, distance=0),  # Coincident.
+        PointPointCoincident(p1, p2),  # Coincident.
         PointPointXDistance(p2, p3, distance=4),
         PointPointYDistance(p2, p3, distance=2),
-        PointPointEuclideanDistance(p3, p4, distance=0),  # Coincident.
+        PointPointCoincident(p3, p4),  # Coincident.
         PointPointXDistance(p4, p5, distance=4),
         # This would make it fully constrained.
         # PointPointYDistance(p4, p5, distance=0),
@@ -471,6 +472,55 @@ def test_determinism():
     print(f"Determinism test completed: {n_passed} passed, {n_failed} failed.")
 
 
+def constrain_perpendicular_with_shared_vertex():
+    """
+    Build a simple polyline p1-p2-p3 with two segments:
+    L1 = (p1, p2), L2 = (p2, p3)
+
+    Then constrain L1 perp L2 at the shared vertex p2.
+    """
+    p1 = Point(x=0.0, y=0.0, id="P1")
+    p2 = Point(x=3.2, y=0.7, id="P2")
+    p3 = Point(x=4.8, y=2.1, id="P3")
+
+    l1 = Line(p1, p2, id="L1")
+    l2 = Line(p2, p3, id="L2")
+
+    # Ensure segments share the middle vertex.
+    assert l1.p2 is l2.p1, "Segments must share the middle vertex"
+
+    primitives = [p1, p2, p3, l1, l2]
+
+    constraints = [
+        PointFixed(point=p1),
+        LineHorizontal(l1),
+        PointPointXDistance(p1, p2, distance=4.0),
+        PointPointYDistance(p2, p3, distance=3.0),
+        LinesPerpendicular(l1, l2),
+    ]
+
+    # Plot initial state.
+    if PLOT:
+        plt.figure(figsize=(8, 8))
+        plot_geometry(primitives, color="red", label="Initial", prime=False)
+
+    # Solve.
+    Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
+    solver = Solver2D(primitives=primitives, constraints=constraints)
+    solver.solve()
+
+    # Plot final state.
+    if PLOT:
+        plot_geometry(primitives, color="blue", label="Solved", prime=True)
+        plt.legend()
+        plt.title("Perpendicular Lines with Shared Vertex")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.axis("equal")
+        plt.grid(True)
+        plt.show()
+
+
 if __name__ == "__main__":
     profiler = Profiler()
     profiler.start()
@@ -481,6 +531,7 @@ if __name__ == "__main__":
     constrain_simple_circle()
     constrain_tangent_circle_to_line()
     constrain_simple_arc()
+    constrain_perpendicular_with_shared_vertex()
 
     profiler.stop()
     profiler.print()
