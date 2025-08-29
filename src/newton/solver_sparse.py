@@ -7,7 +7,11 @@ from scipy.optimize import least_squares
 from scipy.sparse import csc_matrix, csr_matrix, diags, lil_matrix, vstack
 
 import newton.backend as nb
-from newton.constants import CONFIG_USE_NEWTON_FAER, REGULARIZATION_LAMBDA
+from newton.constants import (
+    CONFIG_USE_NEWTON_FAER,
+    CONFIG_USE_REGULARIZATION,
+    REGULARIZATION_LAMBDA,
+)
 from newton.constraints import Constraint
 from newton.logging_config import logger
 from newton.ports import newton_faer
@@ -19,8 +23,6 @@ from newton.ports.newton_faer import (
 from newton.primitives import Primitive
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 from newton.symbolic_substitution import find
-
-REGULARIZE_SYSTEM = True
 
 
 class ConstraintSystemAdapter(NonlinearSystem):
@@ -53,7 +55,7 @@ class ConstraintSystemAdapter(NonlinearSystem):
         # Count constraint residuals.
         n_residuals = sum(c.n_residual_rows for c in self.constraints)
 
-        if REGULARIZE_SYSTEM:
+        if CONFIG_USE_REGULARIZATION:
             # Add regularization terms (one per variable).
             n_regularization_residuals = len(self.independent_vars)
             n_residuals += n_regularization_residuals
@@ -76,7 +78,7 @@ class ConstraintSystemAdapter(NonlinearSystem):
             [c.get_residual(variable_values) for c in self.constraints]
         )
 
-        if REGULARIZE_SYSTEM:
+        if CONFIG_USE_REGULARIZATION:
             # Add Tikhonov regularization term: lambda * (x - x0).
             initial_guess = np.array(
                 [self.initial_values[var_id] for var_id in self.independent_vars]
@@ -107,7 +109,7 @@ class ConstraintSystemAdapter(NonlinearSystem):
         )
 
         # Combine them vertically into the augmented Jacobian
-        if REGULARIZE_SYSTEM:
+        if CONFIG_USE_REGULARIZATION:
             # Add regularization Jacobian (lambda * I) to match scipy behavior.
             n_vars = len(self.independent_vars)
             reg_jacobian = diags([REGULARIZATION_LAMBDA] * n_vars, format="csc")
