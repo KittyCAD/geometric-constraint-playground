@@ -15,11 +15,12 @@ from newton.ports.newton_faer import (
     NewtonConfig,
     NewtonSolver,
     NonlinearSystem,
-    SolverError,
 )
 from newton.primitives import Primitive
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 from newton.symbolic_substitution import find
+
+REGULARIZE_SYSTEM = False
 
 
 class ConstraintSystemAdapter(NonlinearSystem):
@@ -47,7 +48,9 @@ class ConstraintSystemAdapter(NonlinearSystem):
         return len(self.independent_vars)
 
     def residual(self, x: np.ndarray) -> np.ndarray:
-        """Compute residual vector for the constraint system."""
+        """
+        Compute residual vector for the constraint system with Tikhonov regularization.
+        """
         variable_values = self.solver_instance.build_variable_values_map(
             x,
             self.independent_vars,
@@ -60,10 +63,19 @@ class ConstraintSystemAdapter(NonlinearSystem):
             [c.get_residual(variable_values) for c in self.constraints]
         )
 
-        return constraint_residuals
+        if REGULARIZE_SYSTEM:
+            # Add Tikhonov regularization term: lambda * (x - x0).
+            initial_guess = np.array(
+                [self.initial_values[var_id] for var_id in self.independent_vars]
+            )
+            reg_residuals = REGULARIZATION_LAMBDA * (x - initial_guess)
+
+            return np.concatenate([constraint_residuals, reg_residuals])
+
+        else:
+            return constraint_residuals
 
     def jacobian_sparse(self, x: np.ndarray) -> sparse.csr_matrix:
-        """Compute sparse Jacobian matrix."""
         variable_values = self.solver_instance.build_variable_values_map(
             x,
             self.independent_vars,
@@ -71,7 +83,7 @@ class ConstraintSystemAdapter(NonlinearSystem):
             self.substitution_map,
         )
 
-        # Build the sparse jacobian using existing method
+        # Build the sparse jacobian using existing method.
         system_dict = {
             "constraints": self.constraints,
             "substitution_map": self.substitution_map,
@@ -81,10 +93,17 @@ class ConstraintSystemAdapter(NonlinearSystem):
             system_dict, self.var_map, variable_values
         )
 
-        return csr_matrix(jacobian.tocsr())
+        # Combine them vertically into the augmented Jacobian
+        if REGULARIZE_SYSTEM:
+            # Add regularization Jacobian (lambda * I) to match scipy behavior.
+            n_vars = len(self.independent_vars)
+            reg_jacobian = diags([REGULARIZATION_LAMBDA] * n_vars, format="csc")
+            augmented_jacobian = vstack([jacobian, reg_jacobian], format="csc")
+            return csr_matrix(augmented_jacobian)
+        else:
+            return csr_matrix(jacobian)
 
     def jacobian_dense(self, x: np.ndarray) -> np.ndarray:
-        """Compute dense Jacobian matrix."""
         return self.jacobian_sparse(x).toarray()
 
 
@@ -129,12 +148,9 @@ class Solver2DSparse(Solver2D):
 
             i_row += constraint.n_residual_rows
 
-        # logger.debug("Jacobian:\n%s", jacobian.toarray())
-
         return jacobian.tocsc()
 
     def solve_constraint_system(self, system: Dict[str, Any]):
-        """Solve using sparse matrix methods."""
         free_primitives: List[Primitive] = system["free_primitives"]
         constraints: List[Constraint] = system["constraints"]
         substitution_map: Dict[str, str] = system["substitution_map"]
@@ -159,79 +175,24 @@ class Solver2DSparse(Solver2D):
 
         var_map = {var_id: i for i, var_id in enumerate(independent_vars)}
 
-        # Use the consolidated method from base class
+        # Use the consolidated method from base class.
         initial_values = self.get_initial_values_for_all_variables()
         initial_guess = np.array(
             [initial_values[var_id] for var_id in independent_vars]
         )
 
         if CONFIG_USE_NEWTON_FAER:
-            # Use the Newton-Raphson solver from newton_faer port
-            try:
-                logger.debug("Using Newton-Faer solver")
-
-                # Create the system adapter
-                constraint_system = ConstraintSystemAdapter(
-                    constraints=constraints,
-                    independent_vars=independent_vars,
-                    var_map=var_map,
-                    initial_values=initial_values,
-                    substitution_map=substitution_map,
-                    solver_instance=self,
-                )
-
-                # Configure the Newton solver
-                newton_config = NewtonConfig(
-                    tol=SOLVER_CONVERGENCE_TOLERANCE,
-                    max_iter=50,
-                    format=newton_faer.MatrixFormat.SPARSE,  # Use sparse for consistency
-                    adaptive=True,  # Enable adaptive damping
-                    damping=1.0,
-                )
-
-                newton_solver = NewtonSolver(newton_config)
-
-                # Optional callback for debugging
-                def newton_callback(stats):
-                    if logger.isEnabledFor(logging.DEBUG):
-                        logger.debug(
-                            f"Newton iteration {stats.iter}: "
-                            f"residual={stats.residual:.2e}, damping={stats.damping:.3f}"
-                        )
-                    return newton_faer.Control.CONTINUE
-
-                # Solve the system
-                solution, iterations = newton_solver.solve(
-                    constraint_system,
-                    initial_guess,
-                    callback=newton_callback
-                    if logger.isEnabledFor(logging.DEBUG)
-                    else None,
-                )
-
-                logger.debug(f"Newton-Faer converged in {iterations} iterations")
-
-                # Create a result-like object for compatibility with existing code.
-                from scipy.optimize import OptimizeResult
-
-                result = OptimizeResult(
-                    x=solution, success=True, fun=constraint_system.residual(solution)
-                )
-
-            except SolverError as e:
-                logger.warning(f"Newton-Faer solver failed: {e}")
-                logger.info("Falling back to scipy least_squares solver")
-                # Fall back to the original method
-                result = self._solve_with_scipy(
-                    constraints,
-                    independent_vars,
-                    initial_guess,
-                    initial_values,
-                    substitution_map,
-                )
+            result = self.solve_with_newton_faer(
+                constraints,
+                independent_vars,
+                var_map,
+                initial_values,
+                substitution_map,
+                initial_guess,
+            )
         else:
-            # Use the original scipy least_squares method
-            result = self._solve_with_scipy(
+            # Use the original scipy least_squares method.
+            result = self.solve_with_scipy(
                 constraints,
                 independent_vars,
                 initial_guess,
@@ -248,7 +209,51 @@ class Solver2DSparse(Solver2D):
         self.assess_solver_result(final_variable_values, constraints)
         return
 
-    def _solve_with_scipy(
+    def solve_with_newton_faer(
+        self,
+        constraints: List[Constraint],
+        independent_vars: List[str],
+        var_map: Dict[str, int],
+        initial_values: Dict[str, float],
+        substitution_map: Dict[str, str],
+        initial_guess: np.ndarray,
+    ):
+        # Create the system adapter.
+        constraint_system = ConstraintSystemAdapter(
+            constraints=constraints,
+            independent_vars=independent_vars,
+            var_map=var_map,
+            initial_values=initial_values,
+            substitution_map=substitution_map,
+            solver_instance=self,
+        )
+
+        # Configure the Newton solver and sovle.
+        newton_config = NewtonConfig(
+            tol=SOLVER_CONVERGENCE_TOLERANCE,
+            max_iter=50,
+            format=newton_faer.MatrixFormat.SPARSE,
+            adaptive=True,
+            damping=1.0,
+        )
+
+        newton_solver = NewtonSolver(newton_config)
+        solution, iterations = newton_solver.solve(
+            constraint_system,
+            initial_guess,
+        )
+
+        logger.debug(f"Newton-Faer converged in {iterations} iterations")
+
+        # Create a result-like object for compatibility with existing code.
+        from scipy.optimize import OptimizeResult
+
+        result = OptimizeResult(
+            x=solution, success=True, fun=constraint_system.residual(solution)
+        )
+        return result
+
+    def solve_with_scipy(
         self,
         constraints: List[Constraint],
         independent_vars: List[str],
@@ -256,7 +261,6 @@ class Solver2DSparse(Solver2D):
         initial_values: Dict[str, float],
         substitution_map: Dict[str, str],
     ):
-        """Original scipy-based solving method extracted for reuse."""
         var_map = {var_id: i for i, var_id in enumerate(independent_vars)}
 
         def residuals_vector(independent_vars_values: np.ndarray) -> np.ndarray:
