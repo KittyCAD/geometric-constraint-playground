@@ -325,6 +325,8 @@ class Solver2DSparse(Solver2D):
             raise ValueError("Jacobian is empty or not properly initialized.")
 
         # Because of our Tikhonov regularization, we need to adjust the number of equations.
+        # We effectively vertically concatenate the actual Jacobian with another matrix of the
+        # size (REG_LAMBDA * I), which adds n_variables more rows.
         n_variables_independent = len(independent_vars)
         n_geom_equations = sum(c.n_residual_rows for c in constraints)
 
@@ -332,7 +334,10 @@ class Solver2DSparse(Solver2D):
             jacobian_init.todense(), n_variables_independent, n_geom_equations
         )
 
-        # Solve using least_squares
+        # Actual solve magic using the least_squares method.
+        # Not sure which is most appropriate here... CC Dave Reeves: current thinking
+        # Levenberg-Marquardt (lm) is good because least squares and Newton's method.
+        # TRF is on the only supported method for sparse Jacobians
         result = least_squares(
             fun=residuals_vector,
             x0=initial_guess,
