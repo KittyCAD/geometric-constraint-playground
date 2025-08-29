@@ -44,8 +44,21 @@ class ConstraintSystemAdapter(NonlinearSystem):
         self.substitution_map = substitution_map
         self.solver_instance = solver_instance
 
-    def dimension(self) -> int:
+    @property
+    def n_variables(self) -> int:
         return len(self.independent_vars)
+
+    @property
+    def n_residuals(self) -> int:
+        # Count constraint residuals.
+        n_residuals = sum(c.n_residual_rows for c in self.constraints)
+
+        if REGULARIZE_SYSTEM:
+            # Add regularization terms (one per variable).
+            n_regularization_residuals = len(self.independent_vars)
+            n_residuals += n_regularization_residuals
+
+        return n_residuals
 
     def residual(self, x: np.ndarray) -> np.ndarray:
         """

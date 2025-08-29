@@ -11,7 +11,7 @@ we will eventually actually write in Rust.
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum, auto
-from typing import Callable, Optional, Protocol, Tuple, Union
+from typing import Callable, Optional, Protocol, Tuple, Union, cast
 
 import numpy as np
 from scipy import sparse
@@ -136,7 +136,7 @@ class SparseLUSolver(LinearSolver):
     """
 
     def __init__(self):
-        self._lu_factors = None
+        self.lu_factors = None
 
     def factor(self, matrix: Union[np.ndarray, sparse.csr_matrix]) -> None:
         """
@@ -145,7 +145,7 @@ class SparseLUSolver(LinearSolver):
         if not isinstance(matrix, sparse.csr_matrix):
             raise TypeError("SparseLUSolver requires a sparse matrix")
         try:
-            self._lu_factors = splu(matrix.tocsc())
+            self.lu_factors = splu(matrix.tocsc())
         except Exception as e:
             raise SolverError(f"Sparse LU factorization failed: {e}")
 
@@ -153,11 +153,11 @@ class SparseLUSolver(LinearSolver):
         """
         Solve using the factored matrix.
         """
-        if self._lu_factors is None:
+        if self.lu_factors is None:
             raise SolverError("Matrix must be factored before solving")
 
         try:
-            return self._lu_factors.solve(rhs)
+            return self.lu_factors.solve(rhs)
         except Exception as e:
             raise SolverError(f"Sparse LU solve failed: {e}")
 
@@ -181,7 +181,14 @@ class DenseQRSolver(LinearSolver):
         try:
             result = qr(matrix, mode="economic", pivoting=True)
             if len(result) == 3:
-                self.q, self.r, self.p = result
+                # Cast to the specific return type we expect
+                q, r, p = cast(
+                    Tuple[np.ndarray, np.ndarray, np.ndarray],
+                    qr(matrix, mode="economic", pivoting=True),
+                )
+                self.q = q
+                self.r = r
+                self.p = p
             else:
                 raise SolverError("QR factorization did not return expected results")
         except Exception as e:
@@ -241,8 +248,14 @@ class NonlinearSystem(Protocol):
     Protocol for nonlinear systems that can be solved with Newton's method.
     """
 
-    def dimension(self) -> int:
+    @property
+    def n_variables(self) -> int:
         # Return the dimension of the system.
+        ...
+
+    @property
+    def n_residuals(self) -> int:
+        # Return the dimension of the residual (number of equations).
         ...
 
     def residual(self, x: np.ndarray) -> np.ndarray:
@@ -260,7 +273,7 @@ class NonlinearSystem(Protocol):
 
 class NewtonSolver:
     """
-    Newton-Raphson solver for nonlinear systems using explicit LU decomposition.
+    Newton-Raphson solver for nonlinear systems with QR support for overdetermined systems.
     """
 
     USE_QR = True
@@ -297,20 +310,23 @@ class NewtonSolver:
             callback = _callback
 
         x = x0.copy()
-        n = system.dimension()
+        n = system.n_variables  # Number of variables
+        m = system.n_residuals  # Number of equations
 
         if len(x) != n:
             raise ValueError(
-                f"Initial guess dimension {len(x)} doesn't match system dimension {n}."
+                f"Initial guess dimension {len(x)} doesn't match number of variables {n}."
             )
 
         # Determine matrix format and create appropriate solver.
-        use_dense = self.should_use_dense(n)
+        use_dense = self.should_use_dense(max(m, n))
 
         if use_dense:
             if self.USE_QR:
                 solver = DenseQRSolver()
             else:
+                if m != n:
+                    raise SolverError("Non-square system requires QR solver")
                 solver = DenseLUSolver()
 
             return self.solve_iterative(system, x, callback, solver, use_dense=True)
@@ -318,18 +334,20 @@ class NewtonSolver:
             if self.USE_QR:
                 solver = SparseQRSolver()
             else:
+                if m != n:
+                    raise SolverError("Non-square system requires QR solver")
                 solver = SparseLUSolver()
 
             return self.solve_iterative(system, x, callback, solver, use_dense=False)
 
-    def should_use_dense(self, n: int) -> bool:
+    def should_use_dense(self, size: int) -> bool:
         # Determine whether to use dense or sparse matrices.
         if self.config.format == MatrixFormat.DENSE:
             return True
         elif self.config.format == MatrixFormat.SPARSE:
             return False
         else:  # AUTO
-            return n < self.config.format_threshold
+            return size < self.config.format_threshold
 
     def solve_iterative(
         self,
@@ -341,15 +359,16 @@ class NewtonSolver:
     ) -> Tuple[np.ndarray, int]:
         damping = self.config.damping
         last_res = np.inf
-        n = system.dimension()
+        # n = system.n_variables  # Number of variables
+        m = system.n_residuals  # Number of equations
 
-        # Buffers for line search.
-        x_trial = np.zeros_like(x)
-        rhs = np.zeros(n)
+        # Buffers for line search
+        x_trial = np.zeros_like(x)  # Shape: (n,)
+        rhs = np.zeros(m)  # Shape: (m,) - number of equations
 
         for iter in range(self.config.max_iter):
             # Compute residual.
-            f = system.residual(x)
+            f = system.residual(x)  # Shape: (m,)
             res = np.max(np.abs(f))
 
             # Call callback.
@@ -363,15 +382,15 @@ class NewtonSolver:
 
             # Compute Jacobian and factor it.
             if use_dense:
-                jac = system.jacobian_dense(x)
+                jac = system.jacobian_dense(x)  # Shape: (m, n)
             else:
-                jac = system.jacobian_sparse(x)
+                jac = system.jacobian_sparse(x)  # Shape: (m, n)
 
             solver.factor(jac)
 
             # Prepare RHS and solve for Newton step.
-            rhs[:] = -f
-            dx = solver.solve(rhs)
+            rhs[:] = -f  # Shape: (m,) = (m,)
+            dx = solver.solve(rhs)  # Shape: (n,) from solving (m, n) @ (n,) = (m,)
 
             # Apply step with adaptive damping and line search.
             x, damping, step_applied = self._apply_step(
@@ -446,7 +465,12 @@ class NewtonSolver:
 
 
 class SimpleNonlinearSystem:
-    def dimension(self) -> int:
+    @property
+    def n_variables(self) -> int:
+        return 2
+
+    @property
+    def n_residuals(self) -> int:
         return 2
 
     def residual(self, x: np.ndarray) -> np.ndarray:
