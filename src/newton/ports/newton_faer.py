@@ -18,6 +18,8 @@ from scipy import sparse
 from scipy.linalg import lu_factor, lu_solve, qr, solve_triangular
 from scipy.sparse.linalg import lsqr, splu
 
+from newton.logging_config import logger
+
 
 class MatrixFormat(Enum):
     SPARSE = auto()
@@ -162,7 +164,7 @@ class SparseLUSolver(LinearSolver):
             raise SolverError(f"Sparse LU solve failed: {e}")
 
 
-class DenseQRSolver(LinearSolver):
+class QRSolver(LinearSolver):
     """
     Dense QR solver using explicit scipy.linalg.qr.
     """
@@ -171,8 +173,9 @@ class DenseQRSolver(LinearSolver):
         self.q: Optional[np.ndarray] = None
         self.r: Optional[np.ndarray] = None
         self.p: Optional[np.ndarray] = None
+        self.matrix_original: Optional[np.ndarray] = None
 
-    def factor(self, matrix: Union[np.ndarray, sparse.csr_matrix]) -> None:
+    def factor(self, matrix):
         """
         Factor the matrix using QR decomposition.
         """
@@ -181,39 +184,62 @@ class DenseQRSolver(LinearSolver):
         try:
             result = qr(matrix, mode="economic", pivoting=True)
             if len(result) == 3:
-                # Cast to the specific return type we expect
-                q, r, p = cast(
-                    Tuple[np.ndarray, np.ndarray, np.ndarray],
-                    qr(matrix, mode="economic", pivoting=True),
-                )
+                # Cast to the specific return type we expect.
+                q, r, p = cast(Tuple[np.ndarray, np.ndarray, np.ndarray], result)
                 self.q = q
                 self.r = r
                 self.p = p
+                self.matrix_original = matrix
+
+                # Build stats.
+                diag = np.diag(r)  # Diagonal of R.
+                diag_abs = np.abs(diag)  # Absolute values of diagonal.
+                s_max = diag_abs.max() if diag_abs.size else 0.0
+                s_min = diag_abs.min() if diag_abs.size else 0.0
+                condition_number = (s_max / s_min) if (s_min > 0) else np.inf
+                rank = np.linalg.matrix_rank(r)
+
+                # Check reconstruction error: A[:,p] = QR
+                matrix_permutation = matrix[:, p]
+                recon_err = np.linalg.norm(matrix_permutation - np.matmul(q, r)) / (
+                    np.linalg.norm(matrix_permutation) + 1e-16
+                )
+
+                logger.debug(f"System shape: {matrix.shape}")
+                logger.debug(f"Rank estimate (np.linalg.matrix_rank(R)): {rank}")
+                logger.debug(f"Frobenius norm, Q: {np.linalg.norm(q)}")
+                logger.debug(f"Frobenius norm, R: {np.linalg.norm(r)}")
+                logger.debug(f"Reconstruction error: {recon_err}")
+                logger.debug(f"Condition number: {condition_number}")
             else:
                 raise SolverError("QR factorization did not return expected results")
         except Exception as e:
             raise SolverError(f"Dense QR factorization failed: {e}")
 
     def solve(self, rhs: np.ndarray) -> np.ndarray:
-        """
-        Solve the least squares problem using QR factorization.
-        """
         if self.q is None or self.r is None or self.p is None:
             raise SolverError("Matrix must be factored before solving")
         try:
-            # Q^T * rhs.
+            # Solve Ax = rhs. Our caller does rhs = -f, so no sign fuss required.
             qt_rhs = self.q.transpose().dot(rhs)
-            # Solve R * y = Q^T * rhs.
+
+            # Solve the upper triangular system R @ y = Q.T @ rhs.
+            # The result, y, is the solution vector in its permuted order.
             y = solve_triangular(self.r, qt_rhs)
-            # Apply inverse permutation: x[P] = y.
+
+            # Apply the inverse permutation to get the final solution x.
+            # This reorders the solution vector 'y' using the
+            # permutation array 'p' such that the i-th element of y is placed
+            # at the p[i]-th position in x.
             x = np.zeros_like(y)
             x[self.p] = y
+
             return x
         except Exception as e:
             raise SolverError(f"Dense QR solve failed: {e}")
 
 
-class SparseQRSolver(LinearSolver):
+class SparseLSQRSolver(LinearSolver):
     """
     Sparse QR solver using scipy.sparse.linalg.lsqr.
     """
@@ -323,7 +349,7 @@ class NewtonSolver:
 
         if use_dense:
             if self.USE_QR:
-                solver = DenseQRSolver()
+                solver = QRSolver()
             else:
                 if m != n:
                     raise SolverError("Non-square system requires QR solver")
@@ -332,7 +358,7 @@ class NewtonSolver:
             return self.solve_iterative(system, x, callback, solver, use_dense=True)
         else:
             if self.USE_QR:
-                solver = SparseQRSolver()
+                solver = QRSolver()
             else:
                 if m != n:
                     raise SolverError("Non-square system requires QR solver")
@@ -373,6 +399,8 @@ class NewtonSolver:
             # TODO: Switch between these between square and overdetermined systems?
             # res = np.max(np.abs(f))
             res = float(np.linalg.norm(f, ord=2))  # Use L2 norm for convergence check.
+
+            logger.debug(f"Iter {iter}: Residual = {res:.3e}")
 
             # Call callback.
             stats = IterationStats(iter=iter, residual=res, damping=damping)

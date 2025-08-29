@@ -244,7 +244,7 @@ class Solver2DSparse(Solver2D):
         # Configure the Newton solver and sovle.
         newton_config = NewtonConfig(
             tol=SOLVER_CONVERGENCE_TOLERANCE,
-            max_iter=500,
+            max_iter=50,
             format=newton_faer.MatrixFormat.SPARSE,
             adaptive=True,
             damping=1.0,
