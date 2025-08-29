@@ -301,10 +301,10 @@ def constrain_underdetermined():
         PointFixed(point=p0),
         PointPointXDistance(p0, p1, distance=4),
         PointPointYDistance(p0, p1, distance=4),
-        PointPointEuclideanDistance(p1, p2, distance=0),  # Coincident.
+        PointPointCoincident(p1, p2),  # Coincident.
         PointPointXDistance(p2, p3, distance=4),
         PointPointYDistance(p2, p3, distance=2),
-        PointPointEuclideanDistance(p3, p4, distance=0),  # Coincident.
+        PointPointCoincident(p3, p4),  # Coincident.
         PointPointXDistance(p4, p5, distance=4),
         # This would make it fully constrained.
         # PointPointYDistance(p4, p5, distance=0),

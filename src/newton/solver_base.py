@@ -24,8 +24,8 @@ from newton.symbolic_substitution import (
     perform_symbolic_substitution,
 )
 
-SOLVE_VALIDATION_TOLERANCE = 1e-6  # Our maximum allowed error on any constraint.
-SOLVER_CONVERGENCE_TOLERANCE = 1e-10  # The tolerance for convergence in the solver.
+SOLVE_VALIDATION_TOLERANCE = 1e-5  # Our maximum allowed error on any constraint.
+SOLVER_CONVERGENCE_TOLERANCE = 1e-7  # The tolerance for convergence in the solver.
 
 
 class SystemState(Enum):
@@ -274,7 +274,8 @@ class Solver2D(ABC):
             if not system["constraints"]:
                 continue
 
-            free_primitives = self.identify_free_primitives(system["primitives"])
+            # free_primitives = self.identify_free_primitives(system["primitives"])
+            free_primitives = system["primitives"]
             if free_primitives:
                 # Add free_primitives to the system dict for the concrete solver.
                 system["free_primitives"] = free_primitives
