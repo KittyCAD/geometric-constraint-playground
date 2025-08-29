@@ -8,6 +8,11 @@ Adapted and ported to Python with modifications to prove out the approach of a s
 we will eventually actually write in Rust.
 """
 
+# Note that, at present, we have L2 norm convergence checking hardcoded, and
+# we're using QR decomposition for all systems, including square ones. This is
+# just to prove it out and we can always roll-back to a true root-finding
+# approach with LU decomposition for square systems later.
+
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum, auto
