@@ -20,7 +20,7 @@ from newton.primitives import Primitive
 from newton.solver_base import SOLVER_CONVERGENCE_TOLERANCE, Solver2D
 from newton.symbolic_substitution import find
 
-REGULARIZE_SYSTEM = False
+REGULARIZE_SYSTEM = True
 
 
 class ConstraintSystemAdapter(NonlinearSystem):
@@ -244,7 +244,7 @@ class Solver2DSparse(Solver2D):
         # Configure the Newton solver and sovle.
         newton_config = NewtonConfig(
             tol=SOLVER_CONVERGENCE_TOLERANCE,
-            max_iter=50,
+            max_iter=500,
             format=newton_faer.MatrixFormat.SPARSE,
             adaptive=True,
             damping=1.0,

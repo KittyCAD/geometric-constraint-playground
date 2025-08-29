@@ -369,7 +369,10 @@ class NewtonSolver:
         for iter in range(self.config.max_iter):
             # Compute residual.
             f = system.residual(x)  # Shape: (m,)
-            res = np.max(np.abs(f))
+
+            # TODO: Switch between these between square and overdetermined systems?
+            # res = np.max(np.abs(f))
+            res = float(np.linalg.norm(f, ord=2))  # Use L2 norm for convergence check.
 
             # Call callback.
             stats = IterationStats(iter=iter, residual=res, damping=damping)
