@@ -15,8 +15,8 @@ from typing import Callable, Optional, Protocol, Tuple, Union
 
 import numpy as np
 from scipy import sparse
-from scipy.linalg import lu_factor, lu_solve
-from scipy.sparse.linalg import splu
+from scipy.linalg import lu_factor, lu_solve, qr, solve_triangular
+from scipy.sparse.linalg import lsqr, splu
 
 
 class MatrixFormat(Enum):
@@ -82,7 +82,7 @@ class SolverError(Exception):
         super().__init__(self.message)
 
 
-class LUSolver(ABC):
+class LinearSolver(ABC):
     @abstractmethod
     def factor(self, matrix: Union[np.ndarray, sparse.csr_matrix]) -> None:
         """
@@ -97,7 +97,7 @@ class LUSolver(ABC):
         pass
 
 
-class DenseLUSolver(LUSolver):
+class DenseLUSolver(LinearSolver):
     """
     Dense LU solver using scipy.linalg.lu_factor/lu_solve.
     """
@@ -130,7 +130,7 @@ class DenseLUSolver(LUSolver):
             raise SolverError(f"Dense LU solve failed: {e}")
 
 
-class SparseLUSolver(LUSolver):
+class SparseLUSolver(LinearSolver):
     """
     Sparse LU solver using scipy.sparse.linalg.splu.
     """
@@ -162,6 +162,80 @@ class SparseLUSolver(LUSolver):
             raise SolverError(f"Sparse LU solve failed: {e}")
 
 
+class DenseQRSolver(LinearSolver):
+    """
+    Dense QR solver using explicit scipy.linalg.qr.
+    """
+
+    def __init__(self):
+        self.q: Optional[np.ndarray] = None
+        self.r: Optional[np.ndarray] = None
+        self.p: Optional[np.ndarray] = None
+
+    def factor(self, matrix: Union[np.ndarray, sparse.csr_matrix]) -> None:
+        """
+        Factor the matrix using QR decomposition.
+        """
+        if isinstance(matrix, sparse.csr_matrix):
+            matrix = matrix.toarray()
+        try:
+            result = qr(matrix, mode="economic", pivoting=True)
+            if len(result) == 3:
+                self.q, self.r, self.p = result
+            else:
+                raise SolverError("QR factorization did not return expected results")
+        except Exception as e:
+            raise SolverError(f"Dense QR factorization failed: {e}")
+
+    def solve(self, rhs: np.ndarray) -> np.ndarray:
+        """
+        Solve the least squares problem using QR factorization.
+        """
+        if self.q is None or self.r is None or self.p is None:
+            raise SolverError("Matrix must be factored before solving")
+        try:
+            # Q^T * rhs.
+            qt_rhs = self.q.transpose().dot(rhs)
+            # Solve R * y = Q^T * rhs.
+            y = solve_triangular(self.r, qt_rhs)
+            # Apply inverse permutation: x[P] = y.
+            x = np.zeros_like(y)
+            x[self.p] = y
+            return x
+        except Exception as e:
+            raise SolverError(f"Dense QR solve failed: {e}")
+
+
+class SparseQRSolver(LinearSolver):
+    """
+    Sparse QR solver using scipy.sparse.linalg.lsqr.
+    """
+
+    def __init__(self):
+        self.matrix = None
+
+    def factor(self, matrix: Union[np.ndarray, sparse.csr_matrix]) -> None:
+        """
+        Store the sparse matrix for later solving.
+        """
+        if not isinstance(matrix, sparse.csr_matrix):
+            raise TypeError("SparseQRSolver requires a sparse matrix")
+        self.matrix = matrix
+
+    def solve(self, rhs: np.ndarray) -> np.ndarray:
+        """
+        Solve the least squares problem using the stored matrix.
+        """
+        if self.matrix is None:
+            raise SolverError("Matrix must be set before solving")
+
+        try:
+            result = lsqr(self.matrix, rhs)
+            return result[0]
+        except Exception as e:
+            raise SolverError(f"Sparse QR solve failed: {e}")
+
+
 class NonlinearSystem(Protocol):
     """
     Protocol for nonlinear systems that can be solved with Newton's method.
@@ -188,6 +262,8 @@ class NewtonSolver:
     """
     Newton-Raphson solver for nonlinear systems using explicit LU decomposition.
     """
+
+    USE_QR = True
 
     def __init__(self, config: Optional[NewtonConfig] = None):
         self.config = config or NewtonConfig()
@@ -232,15 +308,19 @@ class NewtonSolver:
         use_dense = self.should_use_dense(n)
 
         if use_dense:
-            lu_solver = DenseLUSolver()
-            return self.solve_with_lu_solver(
-                system, x, callback, lu_solver, use_dense=True
-            )
+            if self.USE_QR:
+                solver = DenseQRSolver()
+            else:
+                solver = DenseLUSolver()
+
+            return self.solve_iterative(system, x, callback, solver, use_dense=True)
         else:
-            lu_solver = SparseLUSolver()
-            return self.solve_with_lu_solver(
-                system, x, callback, lu_solver, use_dense=False
-            )
+            if self.USE_QR:
+                solver = SparseQRSolver()
+            else:
+                solver = SparseLUSolver()
+
+            return self.solve_iterative(system, x, callback, solver, use_dense=False)
 
     def should_use_dense(self, n: int) -> bool:
         # Determine whether to use dense or sparse matrices.
@@ -251,12 +331,12 @@ class NewtonSolver:
         else:  # AUTO
             return n < self.config.format_threshold
 
-    def solve_with_lu_solver(
+    def solve_iterative(
         self,
         system: NonlinearSystem,
         x: np.ndarray,
         callback: Callable[[IterationStats], Control],
-        lu_solver: LUSolver,
+        solver: LinearSolver,
         use_dense: bool,
     ) -> Tuple[np.ndarray, int]:
         damping = self.config.damping
@@ -287,11 +367,11 @@ class NewtonSolver:
             else:
                 jac = system.jacobian_sparse(x)
 
-            lu_solver.factor(jac)
+            solver.factor(jac)
 
             # Prepare RHS and solve for Newton step.
             rhs[:] = -f
-            dx = lu_solver.solve(rhs)
+            dx = solver.solve(rhs)
 
             # Apply step with adaptive damping and line search.
             x, damping, step_applied = self._apply_step(
