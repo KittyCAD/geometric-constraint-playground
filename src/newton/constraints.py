@@ -986,6 +986,7 @@ class CircleRadius(BaseConstraint):
 class LineTangentToCircle(BaseConstraint):
     line: Line
     circle: Circle
+    directional: bool = False
 
     def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
         # Get the current state of the primitives.
@@ -1004,19 +1005,31 @@ class LineTangentToCircle(BaseConstraint):
 
         mag_v = nb.np.linalg.norm(v)
 
+        if mag_v < EPS:
+            # TODO: Handle degenerate line case better.
+            return nb.np.array([0.0])
+
         # Avoid division by zero for a zero-length line segment.
         safe_mag_v = nb.np.where(mag_v < EPS, 1.0, mag_v)
 
         # Signed cross product (no absolute value).
         cross_product = v[0] * w[1] - v[1] * w[0]
-        signed_distance_to_line = cross_product / safe_mag_v
+        distance_signed = cross_product / safe_mag_v
 
-        # The residual is the difference between this signed distance and the circle's radius.
-        residual = signed_distance_to_line - radius
+        # Smooth non-directional version.
+        # https://math.stackexchange.com/questions/1284946/soft-absolute-value
+        # This delta value means we avoid non-differentiability at zero,
+        # but it also means that the constraint is never perfectly satisfied.
+        # TODO: We might want to revisit or tune this.
+        delta = 1e-8 * (safe_mag_v + 1.0)
+        distance_abs = nb.np.sqrt(distance_signed**2 + delta**2)
 
-        # The JAX-compatible equivalent of an if-statement.
-        # If the line has no length, the residual is 0, otherwise it's the calculated value.
-        return nb.np.where(mag_v < EPS, nb.np.array([0.0]), nb.np.array([residual]))
+        distance = nb.np.where(self.directional, distance_signed, distance_abs)
+
+        # The residual is the difference between this distance and the circle's radius.
+        residual = distance - radius
+
+        return nb.np.array([residual])
 
     def get_jacobian_row_values(
         self, variable_values: Mapping[str, float]
@@ -1045,22 +1058,39 @@ class LineTangentToCircle(BaseConstraint):
         mag_v_sq = dx**2 + dy**2
 
         if mag_v_sq < EPS:
+            # TODO: Handle degenerate line case better.
             return []
 
         mag_v = np.sqrt(mag_v_sq)
-        mag_v_cubed = mag_v_sq ** (3 / 2)
+        mag_v_cubed = mag_v_sq * mag_v
+
+        # Use same safe_mag_v and delta pattern as residual.
+        safe_mag_v = mag_v if mag_v >= EPS else 1.0
+        delta = 1e-8 * (safe_mag_v + 1.0)
 
         # Cross product term that appears in the derivatives.
-        cross_term = dx * (y1 - yc) - (x1 - xc) * dy
+        cross_product = dx * (y1 - yc) - (x1 - xc) * dy
+        distance_signed = cross_product / safe_mag_v
+        distance_abs = np.sqrt(distance_signed**2 + delta**2)  # Smoothed.
 
+        # This scale factor will mop up sign between directional and non-directional
+        # cases. If directional is True, scale is 1 (R = d - r),
+        # otherwise we use d/(sqrt(d^2+delta^2) (smooths |d| at 0).
+        # Note that we don't account for the derivative of the delta bit in our
+        # results here, but we should otherwise match the gradient of the residual
+        # function above and the delta term is very small.
+        # See https://math.stackexchange.com/questions/1284946/soft-absolute-value
+        scale = 1.0 if self.directional else (distance_signed / distance_abs)
+
+        # Apply sign multiplier to all derivatives except radius
         # fmt: off
         # ruff: noqa
-        dr_dx1 = (-dx * cross_term + (y2 - yc) * mag_v_sq) / mag_v_cubed
-        dr_dy1 = ((-x2 + xc) * mag_v_sq - dy * cross_term) / mag_v_cubed
-        dr_dx2 = (dx * cross_term + (-y1 + yc) * mag_v_sq) / mag_v_cubed
-        dr_dy2 = ((x1 - xc) * mag_v_sq + dy * cross_term) / mag_v_cubed
-        dr_dxc = (y1 - y2) / mag_v
-        dr_dyc = (-x1 + x2) / mag_v
+        dr_dx1 = scale * (-dx * cross_product + (y2 - yc) * mag_v_sq) / mag_v_cubed
+        dr_dy1 = scale * ((-x2 + xc) * mag_v_sq - dy * cross_product) / mag_v_cubed
+        dr_dx2 = scale * (dx * cross_product + (-y1 + yc) * mag_v_sq) / mag_v_cubed
+        dr_dy2 = scale * ((x1 - xc) * mag_v_sq + dy * cross_product) / mag_v_cubed
+        dr_dxc = scale * (y1 - y2) / mag_v
+        dr_dyc = scale * (-x1 + x2) / mag_v
         dr_dr = -1.0
         # fmt: on
         # ruff: enable
