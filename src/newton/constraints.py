@@ -1073,12 +1073,12 @@ class LineTangentToCircle(BaseConstraint):
         distance_signed = cross_product / safe_mag_v
         distance_abs = np.sqrt(distance_signed**2 + delta**2)  # Smoothed.
 
-        # This scale factor will mop up the non-differentiability at zero
-        # for the non-directional case. If directional is True, scale is 1 (R = d - r),
+        # This scale factor will mop up sign between directional and non-directional
+        # cases. If directional is True, scale is 1 (R = d - r),
         # otherwise we use d/(sqrt(d^2+delta^2) (smooths |d| at 0).
-        # Note that we don't account for the derivative of the smoothing in our
-        # Jacobian, which means the solver won't be perfectly accurate at
-        # driving the residual to zero.
+        # Note that we don't account for the derivative of the delta bit in our
+        # results here, but we should otherwise match the gradient of the residual
+        # function above and the delta term is very small.
         # See https://math.stackexchange.com/questions/1284946/soft-absolute-value
         scale = 1.0 if self.directional else (distance_signed / distance_abs)
 
