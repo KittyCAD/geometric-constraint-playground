@@ -33,7 +33,11 @@ from newton.solver_sparse import Solver2DSparse
 
 configure_logging(level=logging.DEBUG)
 
-PLOT = True
+PLOT = False
+USE_SINCOS = False
+
+
+_LineLineAngle = LineLineAngleSinCos if USE_SINCOS else LineLineAngle
 
 
 def add_random_error(points: list[Point], error_range: float = 1.0, seed: int = 42):
@@ -535,9 +539,6 @@ def constrain_three_link_arm():
       - angle(L2, L3) = theta23
     Uses LineLineAngle (atan2-based) for the two joint angles.
     """
-    USE_SINCOS = False
-    ANGLE = LineLineAngleSinCos if USE_SINCOS else LineLineAngle
-
     L1, L2, L3 = 4.0, 3.0, 2.5
 
     theta12 = np.deg2rad(-0.001)
@@ -570,8 +571,8 @@ def constrain_three_link_arm():
         PointPointEuclideanDistance(p0, p1, distance=L1),
         PointPointEuclideanDistance(p1, p2, distance=L2),
         PointPointEuclideanDistance(p2, p3, distance=L3),
-        ANGLE(line1=l1, line2=l2, angle=float(theta12)),
-        ANGLE(line1=l2, line2=l3, angle=float(theta23)),
+        _LineLineAngle(line1=l1, line2=l2, angle=float(theta12)),
+        _LineLineAngle(line1=l2, line2=l3, angle=float(theta23)),
     ]
 
     # Plot initial
