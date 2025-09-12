@@ -12,6 +12,8 @@ from newton.constraints import (
     ArcRadius,
     CircleRadius,
     LineHorizontal,
+    LineLineAngle,
+    LineLineAngleSinCos,
     LineLineDistance,
     LinesEqualLength,
     LinesParallel,
@@ -31,7 +33,11 @@ from newton.solver_sparse import Solver2DSparse
 
 configure_logging(level=logging.DEBUG)
 
-PLOT = True
+PLOT = False
+USE_SINCOS = False
+
+
+_LineLineAngle = LineLineAngleSinCos if USE_SINCOS else LineLineAngle
 
 
 def add_random_error(points: list[Point], error_range: float = 1.0, seed: int = 42):
@@ -521,17 +527,88 @@ def constrain_perpendicular_with_shared_vertex():
         plt.show()
 
 
+def constrain_three_link_arm():
+    """
+    Three-link planar arm:
+      L1 = (p0, p1), L2 = (p1, p2), L3 = (p2, p3)
+    Constrain:
+      - base point fixed
+      - L1 horizontal
+      - lengths for each segment
+      - angle(L1, L2) = theta12
+      - angle(L2, L3) = theta23
+    Uses LineLineAngle (atan2-based) for the two joint angles.
+    """
+    L1, L2, L3 = 4.0, 3.0, 2.5
+
+    theta12 = np.deg2rad(-0.001)
+    theta23 = np.deg2rad(180.001)
+
+    # Seed a near-consistent initial geometry.
+    p0 = Point(x=0.0, y=0.0, id="A_P0")  # base, fixed
+    p1 = Point(x=L1, y=0.0, id="A_P1")  # L1 horizontal from base
+    p2 = Point(x=p1.x + L2 * np.cos(theta12), y=p1.y + L2 * np.sin(theta12), id="A_P2")
+    ang3 = theta12 + theta23
+    p3 = Point(x=p2.x + L3 * np.cos(ang3), y=p2.y + L3 * np.sin(ang3), id="A_P3")
+
+    # Add a little noise so the solver actually works to satisfy constraints.
+    add_random_error([p1, p2, p3], error_range=3, seed=7)
+
+    # Lines sharing joints (polyline/arm).
+    l1 = Line(p0, p1, id="A_L1")
+    l2 = Line(p1, p2, id="A_L2")
+    l3 = Line(p2, p3, id="A_L3")
+
+    primitives: list[Primitive] = [p0, p1, p2, p3, l1, l2, l3]
+
+    # Constraints:
+    # - Fix base, make L1 horizontal to anchor global orientation.
+    # - Enforce segment lengths (use point-point distance to avoid extra imports).
+    # - Enforce joint angles with LineLineAngle.
+    constraints = [
+        PointFixed(point=p0),
+        LineHorizontal(line=l1),
+        PointPointEuclideanDistance(p0, p1, distance=L1),
+        PointPointEuclideanDistance(p1, p2, distance=L2),
+        PointPointEuclideanDistance(p2, p3, distance=L3),
+        _LineLineAngle(line1=l1, line2=l2, angle=float(theta12)),
+        _LineLineAngle(line1=l2, line2=l3, angle=float(theta23)),
+    ]
+
+    # Plot initial
+    if PLOT:
+        plt.figure(figsize=(8, 8))
+        plot_geometry(primitives, color="red", label="Initial", prime=False)
+
+    # Solve
+    Solver2D = Solver2DSparse if CONFIG_USE_SPARSE_SOLVE else Solver2DDense
+    solver = Solver2D(primitives=primitives, constraints=constraints)
+    solver.solve()
+
+    # Plot solved
+    if PLOT:
+        plot_geometry(primitives, color="blue", label="Solved", prime=True)
+        plt.legend()
+        plt.title("Three-Link Arm with Angle Constraints")
+        plt.xlabel("X")
+        plt.ylabel("Y")
+        plt.axis("equal")
+        plt.grid(True)
+        plt.show()
+
+
 if __name__ == "__main__":
     profiler = Profiler()
     profiler.start()
 
-    constrain_rectangles()
-    constrain_parallel_offset()
-    constrain_underdetermined()
-    constrain_simple_circle()
-    constrain_tangent_circle_to_line()
-    constrain_simple_arc()
-    constrain_perpendicular_with_shared_vertex()
+    # constrain_rectangles()
+    # constrain_parallel_offset()
+    # constrain_underdetermined()
+    # constrain_simple_circle()
+    # constrain_tangent_circle_to_line()
+    # constrain_simple_arc()
+    # constrain_perpendicular_with_shared_vertex()
+    constrain_three_link_arm()
 
     profiler.stop()
     profiler.print()

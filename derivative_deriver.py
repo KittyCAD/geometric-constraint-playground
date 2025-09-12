@@ -186,6 +186,137 @@ def compute_line_line_angle_derivatives():
         print(f"∂R/∂{var} = {simplified_deriv}")
 
 
+def compute_line_line_angle_sincos_derivatives():
+    # Variables for two lines: p1(x1,y1)-p2(x2,y2), p3(x3,y3)-p4(x4,y4).
+    x1, y1, x2, y2 = sp.symbols("x1 y1 x2 y2", real=True)
+    x3, y3, x4, y4 = sp.symbols("x3 y3 x4 y4", real=True)
+    alpha = sp.Symbol("alpha", real=True)
+
+    # Direction vectors.
+    v1x, v1y = (x2 - x1), (y2 - y1)
+    v2x, v2y = (x4 - x3), (y4 - y3)
+
+    # Norms (symbolic; at runtime we need to guard against degeneracy).
+    n1 = sp.sqrt(v1x**2 + v1y**2)
+    n2 = sp.sqrt(v2x**2 + v2y**2)
+
+    # Unit directions.
+    u1x, u1y = v1x / n1, v1y / n1
+    u2x, u2y = v2x / n2, v2y / n2
+
+    # Targets.
+    cos_a = sp.cos(alpha)
+    sin_a = sp.sin(alpha)
+
+    # Two residuals: cos and sin.
+    r_cos = (u1x * u2x + u1y * u2y) - cos_a
+    r_sin = (u1x * u2y - u1y * u2x) - sin_a
+
+    # Vector of residuals and full Jacobian.
+    r = sp.Matrix([r_cos, r_sin])
+    vars_vec = sp.Matrix([x1, y1, x2, y2, x3, y3, x4, y4])
+
+    # Pretty output
+    print("Residuals:")
+    print("  R_cos = u1 . u2 - cos(alpha) =", sp.simplify(r_cos))
+    print("  R_sin = (u1 x u2)_z - sin(alpha) =", sp.simplify(r_sin))
+
+    print("\nJacobians (∂R_i/∂var):")
+
+    for i, r_i in enumerate(["R_cos", "R_sin"]):
+        for v, sym in zip(
+            ["x1", "y1", "x2", "y2", "x3", "y3", "x4", "y4"], list(vars_vec)
+        ):
+            d = sp.simplify(sp.diff(r[i], sym))
+            print(f"  d{r_i}/d{v} = {d}")
+
+
+def compute_line_line_angle_sincos_derivatives_factored():
+    # Variables for two lines: p1(x1,y1)-p2(x2,y2), p3(x3,y3)-p4(x4,y4).
+    x1, y1, x2, y2 = sp.symbols("x1 y1 x2 y2", real=True)
+    x3, y3, x4, y4 = sp.symbols("x3 y3 x4 y4", real=True)
+    alpha = sp.Symbol("alpha", real=True)
+
+    # Direction vectors.
+    v1x, v1y = (x2 - x1), (y2 - y1)
+    v2x, v2y = (x4 - x3), (y4 - y3)
+
+    # Norms (symbolic; at runtime we need to guard against degeneracy).
+    n1 = sp.sqrt(v1x**2 + v1y**2)
+    n2 = sp.sqrt(v2x**2 + v2y**2)
+
+    # Unit directions.
+    u1x, u1y = v1x / n1, v1y / n1
+    u2x, u2y = v2x / n2, v2y / n2
+
+    # Targets.
+    cos_a = sp.cos(alpha)
+    sin_a = sp.sin(alpha)
+
+    # Two residuals: cos and sin.
+    r_cos = (u1x * u2x + u1y * u2y) - cos_a
+    r_sin = (u1x * u2y - u1y * u2x) - sin_a
+
+    # Vector of residuals and full Jacobian.
+    r = sp.Matrix([r_cos, r_sin])
+    vars_vec = sp.Matrix([x1, y1, x2, y2, x3, y3, x4, y4])
+
+    # Define common subexpressions for cleaner output
+    # Direction vectors (using original variable names for clarity)
+    v1x_sym = sp.Symbol("v1x")  # x2 - x1
+    v1y_sym = sp.Symbol("v1y")  # y2 - y1
+    v2x_sym = sp.Symbol("v2x")  # x4 - x3
+    v2y_sym = sp.Symbol("v2y")  # y4 - y3
+
+    # Squared norms
+    n1_sq = sp.Symbol("n1_sq")  # v1x^2 + v1y^2
+    n2_sq = sp.Symbol("n2_sq")  # v2x^2 + v2y^2
+
+    # Dot and cross products of direction vectors
+    v_dot = sp.Symbol("v_dot")  # v1x*v2x + v1y*v2y
+    v_cross = sp.Symbol("v_cross")  # v1x*v2y - v1y*v2x
+
+    # Create substitution dictionary
+    subs_dict = {
+        x2 - x1: v1x_sym,
+        y2 - y1: v1y_sym,
+        x4 - x3: v2x_sym,
+        y4 - y3: v2y_sym,
+        (x2 - x1) ** 2 + (y2 - y1) ** 2: n1_sq,
+        (x4 - x3) ** 2 + (y4 - y3) ** 2: n2_sq,
+        (x2 - x1) * (x4 - x3) + (y2 - y1) * (y4 - y3): v_dot,
+        (x2 - x1) * (y4 - y3) - (x4 - x3) * (y2 - y1): v_cross,
+    }
+
+    print("Common subexpressions:")
+    print("  v1x = x2 - x1,  v1y = y2 - y1")
+    print("  v2x = x4 - x3,  v2y = y4 - y3")
+    print("  n1_sq = v1x² + v1y²,  n2_sq = v2x² + v2y²")
+    print("  v_dot = v1x*v2x + v1y*v2y  (dot product)")
+    print("  v_cross = v1x*v2y - v1y*v2x  (cross product z-component)")
+    print()
+
+    print("Residuals:")
+    r_cos_clean = r_cos.subs(subs_dict)
+    r_sin_clean = r_sin.subs(subs_dict)
+    print("  R_cos = u1 · u2 - cos(α) =", r_cos_clean)
+    print("  R_sin = (u1 × u2)_z - sin(α) =", r_sin_clean)
+    print()
+
+    print("Jacobians (∂R_i/∂var):")
+    var_names = ["x1", "y1", "x2", "y2", "x3", "y3", "x4", "y4"]
+    residual_names = ["R_cos", "R_sin"]
+
+    for i, r_name in enumerate(residual_names):
+        print(f"\n  {r_name} derivatives:")
+        for j, (var_name, var_sym) in enumerate(zip(var_names, vars_vec)):
+            derivative = sp.diff(r[i], var_sym)
+            # Apply substitutions to clean up the derivative
+            derivative_clean = derivative.subs(subs_dict)
+            derivative_clean = sp.simplify(derivative_clean)
+            print(f"    ∂{r_name}/∂{var_name} = {derivative_clean}")
+
+
 def compute_line_line_distance_derivatives():
     x1, y1, x2, y2 = sp.symbols("x1 y1 x2 y2")  # Line 1: p1 to p2
     xp, yp = sp.symbols("xp yp")  # Point on Line 2
@@ -296,6 +427,8 @@ if __name__ == "__main__":
     # compute_lines_perpendicular_derivatives()
     # compute_lines_equal_length_derivatives()
     # compute_line_line_angle_derivatives()
+    # compute_line_line_angle_sincos_derivatives()
+    compute_line_line_angle_sincos_derivatives_factored()
     # compute_line_line_distance_derivatives()
     # compute_line_tangent_to_circle_derivatives()
-    compute_point_point_coincident_derivatives()
+    # compute_point_point_coincident_derivatives()
