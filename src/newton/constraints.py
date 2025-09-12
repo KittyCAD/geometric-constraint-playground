@@ -748,8 +748,12 @@ class LineLineAngle(BaseConstraint):
         # Current angle using atan2.
         current_angle = nb.np.atan2(cross_2d, dot_product)
 
+        # Normalise target angle to [-pi, pi] to match atan2 output range.
+        # https://stackoverflow.com/questions/15927755/opposite-of-numpy-unwrap
+        target_angle = nb.np.arctan2(nb.np.sin(self.angle), nb.np.cos(self.angle))
+
         # Compute angle difference.
-        angle_residual = nb.np.array([current_angle - self.angle])
+        angle_residual = nb.np.array([current_angle - target_angle])
 
         # Return 0.0 if invalid, otherwise return residual.
         return nb.np.where(is_invalid, nb.np.array([0.0]), angle_residual)
@@ -837,6 +841,180 @@ class LineLineAngle(BaseConstraint):
             (p3_y_var, dr_dy3, i_residual),
             (p4_x_var, dr_dx4, i_residual),
             (p4_y_var, dr_dy4, i_residual),
+        ]
+
+    def get_involved_primitive_ids(self) -> frozenset:
+        ids_1 = self.line1.get_involved_primitive_ids()
+        ids_2 = self.line2.get_involved_primitive_ids()
+
+        return frozenset(ids_1.union(ids_2))
+
+
+@dataclass
+class LineLineAngleSinCos(BaseConstraint):
+    # LineLineAngle constraint via two residuals: sin(angle) and cos(angle).
+    # This should be continuous and avoid discontinuities around +/- pi.
+    line1: Line
+    line2: Line
+    angle: float = field()
+
+    @property
+    def n_residual_rows(self) -> int:
+        return 2  # [cos residual, sin residual]
+
+    def get_residual(self, variable_values: Mapping[str, float]) -> nb.Vector:
+        # Get direction vectors for both lines.
+        p1 = self.line1.p1.get_state(variable_values)
+        p2 = self.line1.p2.get_state(variable_values)
+        p3 = self.line2.p1.get_state(variable_values)
+        p4 = self.line2.p2.get_state(variable_values)
+
+        v1 = p2 - p1
+        v2 = p4 - p3
+
+        # Calculate magnitudes.
+        mag1 = nb.np.linalg.norm(v1)
+        mag2 = nb.np.linalg.norm(v2)
+
+        # Check for zero-length lines.
+        is_invalid = (mag1 < EPS) | (mag2 < EPS)
+
+        # Get safe versions of magnitudes to avoid division by zero.
+        # TODO: Maye we can do something like the soft-abs here?
+        mag1_safe = nb.np.where(mag1 < EPS, 1.0, mag1)
+        mag2_safe = nb.np.where(mag2 < EPS, 1.0, mag2)
+
+        # Get normalised direction vectors.
+        u1 = v1 / mag1_safe
+        u2 = v2 / mag2_safe
+
+        # Get sin and cos residuals.
+        r_cos = (u1[0] * u2[0] + u1[1] * u2[1]) - nb.np.cos(self.angle)
+        r_sin = (u1[0] * u2[1] - u1[1] * u2[0]) - nb.np.sin(self.angle)
+
+        res = nb.np.array([r_cos, r_sin])
+
+        return nb.np.where(is_invalid, nb.np.array([0.0, 0.0]), res)
+
+    def get_jacobian_row_values(
+        self, variable_values: Mapping[str, float]
+    ) -> List[Tuple[str, float, int]]:
+        # Common subexpressions:
+        #   v1x = x2 - x1,  v1y = y2 - y1
+        #   v2x = x4 - x3,  v2y = y4 - y3
+        #   n1_sq = v1x² + v1y²,  n2_sq = v2x² + v2y²
+        #   v_dot = v1x*v2x + v1y*v2y  (dot product)
+        #   v_cross = v1x*v2y - v1y*v2x  (cross product z-component)
+        #
+        # Residuals:
+        #   R_cos = u1 · u2 - cos(α) = -cos(alpha) + v1x*v2x/(sqrt(n1_sq)*sqrt(n2_sq)) + v1y*v2y/(sqrt(n1_sq)*sqrt(n2_sq))
+        #   R_sin = (u1 × u2)_z - sin(α) = -sin(alpha) + v1x*v2y/(sqrt(n1_sq)*sqrt(n2_sq)) - v1y*v2x/(sqrt(n1_sq)*sqrt(n2_sq))
+        #
+        # Jacobians (∂R_i/∂var):
+        #
+        #   R_cos derivatives:
+        #     ∂R_cos/∂x1 = (-n1_sq*v2x + v1x*(v1x*v2x + v1y*v2y))/(n1_sq**(3/2)*sqrt(n2_sq))
+        #     ∂R_cos/∂y1 = (-n1_sq*v2y + v1y*(v1x*v2x + v1y*v2y))/(n1_sq**(3/2)*sqrt(n2_sq))
+        #     ∂R_cos/∂x2 = (n1_sq*v2x - v1x*(v1x*v2x + v1y*v2y))/(n1_sq**(3/2)*sqrt(n2_sq))
+        #     ∂R_cos/∂y2 = (n1_sq*v2y - v1y*(v1x*v2x + v1y*v2y))/(n1_sq**(3/2)*sqrt(n2_sq))
+        #     ∂R_cos/∂x3 = (-n2_sq*v1x + v2x*(v1x*v2x + v1y*v2y))/(sqrt(n1_sq)*n2_sq**(3/2))
+        #     ∂R_cos/∂y3 = (-n2_sq*v1y + v2y*(v1x*v2x + v1y*v2y))/(sqrt(n1_sq)*n2_sq**(3/2))
+        #     ∂R_cos/∂x4 = (n2_sq*v1x - v2x*(v1x*v2x + v1y*v2y))/(sqrt(n1_sq)*n2_sq**(3/2))
+        #     ∂R_cos/∂y4 = (n2_sq*v1y - v2y*(v1x*v2x + v1y*v2y))/(sqrt(n1_sq)*n2_sq**(3/2))
+
+        #   R_sin derivatives:
+        #     ∂R_sin/∂x1 = (-n1_sq*v2y + v1x*(v1x*v2y - v1y*v2x))/(n1_sq**(3/2)*sqrt(n2_sq))
+        #     ∂R_sin/∂y1 = (n1_sq*v2x + v1y*(v1x*v2y - v1y*v2x))/(n1_sq**(3/2)*sqrt(n2_sq))
+        #     ∂R_sin/∂x2 = (n1_sq*v2y + v1x*(-v1x*v2y + v1y*v2x))/(n1_sq**(3/2)*sqrt(n2_sq))
+        #     ∂R_sin/∂y2 = (-n1_sq*v2x + v1y*(-v1x*v2y + v1y*v2x))/(n1_sq**(3/2)*sqrt(n2_sq))
+        #     ∂R_sin/∂x3 = (n2_sq*v1y + v2x*(v1x*v2y - v1y*v2x))/(sqrt(n1_sq)*n2_sq**(3/2))
+        #     ∂R_sin/∂y3 = (-n2_sq*v1x + v2y*(v1x*v2y - v1y*v2x))/(sqrt(n1_sq)*n2_sq**(3/2))
+        #     ∂R_sin/∂x4 = (-n2_sq*v1y + v2x*(-v1x*v2y + v1y*v2x))/(sqrt(n1_sq)*n2_sq**(3/2))
+        #     ∂R_sin/∂y4 = (n2_sq*v1x + v2y*(-v1x*v2y + v1y*v2x))/(sqrt(n1_sq)*n2_sq**(3/2))
+
+        # Points
+        p1 = self.line1.p1.get_state(variable_values)
+        p2 = self.line1.p2.get_state(variable_values)
+        p3 = self.line2.p1.get_state(variable_values)
+        p4 = self.line2.p2.get_state(variable_values)
+
+        x1, y1 = float(p1[0]), float(p1[1])
+        x2, y2 = float(p2[0]), float(p2[1])
+        x3, y3 = float(p3[0]), float(p3[1])
+        x4, y4 = float(p4[0]), float(p4[1])
+
+        # Common subexpressions.
+        v1x = x2 - x1
+        v1y = y2 - y1
+        v2x = x4 - x3
+        v2y = y4 - y3
+
+        n1_sq = v1x * v1x + v1y * v1y
+        n2_sq = v2x * v2x + v2y * v2y
+
+        # Guard degeneracy.
+        if n1_sq < EPS * EPS or n2_sq < EPS * EPS:
+            return []
+
+        n1 = float(nb.np.sqrt(n1_sq))
+        n2 = float(nb.np.sqrt(n2_sq))
+
+        v_dot = v1x * v2x + v1y * v2y
+        v_cross = v1x * v2y - v1y * v2x
+
+        # Denominators.
+        denom_v1 = (n1_sq * n1) * n2  # n1^3 * n2
+        denom_v2 = n1 * (n2_sq * n2)  # n1 * n2^3
+
+        # R_cos partials (row 0).
+        dRc_dx1 = (v1x * v_dot - n1_sq * v2x) / denom_v1
+        dRc_dy1 = (v1y * v_dot - n1_sq * v2y) / denom_v1
+        dRc_dx2 = (n1_sq * v2x - v1x * v_dot) / denom_v1
+        dRc_dy2 = (n1_sq * v2y - v1y * v_dot) / denom_v1
+        dRc_dx3 = (v2x * v_dot - n2_sq * v1x) / denom_v2
+        dRc_dy3 = (v2y * v_dot - n2_sq * v1y) / denom_v2
+        dRc_dx4 = (n2_sq * v1x - v2x * v_dot) / denom_v2
+        dRc_dy4 = (n2_sq * v1y - v2y * v_dot) / denom_v2
+
+        # R_sin partials (row 1).
+        dRs_dx1 = (v1x * v_cross - n1_sq * v2y) / denom_v1
+        dRs_dy1 = (n1_sq * v2x + v1y * v_cross) / denom_v1
+        dRs_dx2 = (n1_sq * v2y - v1x * v_cross) / denom_v1
+        dRs_dy2 = (-n1_sq * v2x - v1y * v_cross) / denom_v1
+        dRs_dx3 = (n2_sq * v1y + v2x * v_cross) / denom_v2
+        dRs_dy3 = (-n2_sq * v1x + v2y * v_cross) / denom_v2
+        dRs_dx4 = (-n2_sq * v1y - v2x * v_cross) / denom_v2
+        dRs_dy4 = (n2_sq * v1x - v2y * v_cross) / denom_v2
+
+        # Residual indices.
+        i_cos = 0
+        i_sin = 1
+
+        # Variable IDs.
+        p1_vars = self.line1.p1.get_variable_ids()
+        p2_vars = self.line1.p2.get_variable_ids()
+        p3_vars = self.line2.p1.get_variable_ids()
+        p4_vars = self.line2.p2.get_variable_ids()
+
+        return [
+            # R_cos row.
+            (p1_vars[0], float(dRc_dx1), i_cos),
+            (p1_vars[1], float(dRc_dy1), i_cos),
+            (p2_vars[0], float(dRc_dx2), i_cos),
+            (p2_vars[1], float(dRc_dy2), i_cos),
+            (p3_vars[0], float(dRc_dx3), i_cos),
+            (p3_vars[1], float(dRc_dy3), i_cos),
+            (p4_vars[0], float(dRc_dx4), i_cos),
+            (p4_vars[1], float(dRc_dy4), i_cos),
+            # R_sin row.
+            (p1_vars[0], float(dRs_dx1), i_sin),
+            (p1_vars[1], float(dRs_dy1), i_sin),
+            (p2_vars[0], float(dRs_dx2), i_sin),
+            (p2_vars[1], float(dRs_dy2), i_sin),
+            (p3_vars[0], float(dRs_dx3), i_sin),
+            (p3_vars[1], float(dRs_dy3), i_sin),
+            (p4_vars[0], float(dRs_dx4), i_sin),
+            (p4_vars[1], float(dRs_dy4), i_sin),
         ]
 
     def get_involved_primitive_ids(self) -> frozenset:
@@ -1228,6 +1406,7 @@ Constraint = Union[
     LineHorizontal,
     LineLength,
     LineLineAngle,
+    LineLineAngleSinCos,
     LineLineDistance,
     LinesEqualLength,
     LinesParallel,
