@@ -748,15 +748,11 @@ class LineLineAngle(BaseConstraint):
         # Current angle using atan2.
         current_angle = nb.np.atan2(cross_2d, dot_product)
 
-        # Normalise target angle to [-pi, pi] to match atan2 output range.
-        # https://stackoverflow.com/questions/15927755/opposite-of-numpy-unwrap
-        target_angle = nb.np.arctan2(nb.np.sin(self.angle), nb.np.cos(self.angle))
+        # Wrap the delta to (-pi, pi].
+        r_raw = current_angle - self.angle
+        r_wrapped = nb.np.array([nb.np.atan2(nb.np.sin(r_raw), nb.np.cos(r_raw))])
 
-        # Compute angle difference.
-        angle_residual = nb.np.array([current_angle - target_angle])
-
-        # Return 0.0 if invalid, otherwise return residual.
-        return nb.np.where(is_invalid, nb.np.array([0.0]), angle_residual)
+        return nb.np.where(is_invalid, nb.np.array([0.0]), r_wrapped)
 
     def get_jacobian_row_values(
         self, variable_values: Mapping[str, float]
