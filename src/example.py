@@ -535,13 +535,13 @@ def constrain_three_link_arm():
       - angle(L2, L3) = theta23
     Uses LineLineAngle (atan2-based) for the two joint angles.
     """
-    USE_SINCOS = True
+    USE_SINCOS = False
     ANGLE = LineLineAngleSinCos if USE_SINCOS else LineLineAngle
 
     L1, L2, L3 = 4.0, 3.0, 2.5
 
-    theta12 = np.deg2rad(45.0)
-    theta23 = np.deg2rad(185)
+    theta12 = np.deg2rad(-0.001)
+    theta23 = np.deg2rad(180.001)
 
     # Seed a near-consistent initial geometry.
     p0 = Point(x=0.0, y=0.0, id="A_P0")  # base, fixed

@@ -967,24 +967,24 @@ class LineLineAngleSinCos(BaseConstraint):
         denom_v2 = n1 * (n2_sq * n2)  # n1 * n2^3
 
         # R_cos partials (row 0).
-        dRc_dx1 = (v1x * v_dot - n1_sq * v2x) / denom_v1
-        dRc_dy1 = (v1y * v_dot - n1_sq * v2y) / denom_v1
-        dRc_dx2 = (n1_sq * v2x - v1x * v_dot) / denom_v1
-        dRc_dy2 = (n1_sq * v2y - v1y * v_dot) / denom_v1
-        dRc_dx3 = (v2x * v_dot - n2_sq * v1x) / denom_v2
-        dRc_dy3 = (v2y * v_dot - n2_sq * v1y) / denom_v2
-        dRc_dx4 = (n2_sq * v1x - v2x * v_dot) / denom_v2
-        dRc_dy4 = (n2_sq * v1y - v2y * v_dot) / denom_v2
+        drc_dx1 = (v1x * v_dot - n1_sq * v2x) / denom_v1
+        drc_dy1 = (v1y * v_dot - n1_sq * v2y) / denom_v1
+        drc_dx2 = (n1_sq * v2x - v1x * v_dot) / denom_v1
+        drc_dy2 = (n1_sq * v2y - v1y * v_dot) / denom_v1
+        drc_dx3 = (v2x * v_dot - n2_sq * v1x) / denom_v2
+        drc_dy3 = (v2y * v_dot - n2_sq * v1y) / denom_v2
+        drc_dx4 = (n2_sq * v1x - v2x * v_dot) / denom_v2
+        drc_dy4 = (n2_sq * v1y - v2y * v_dot) / denom_v2
 
         # R_sin partials (row 1).
-        dRs_dx1 = (v1x * v_cross - n1_sq * v2y) / denom_v1
-        dRs_dy1 = (n1_sq * v2x + v1y * v_cross) / denom_v1
-        dRs_dx2 = (n1_sq * v2y - v1x * v_cross) / denom_v1
-        dRs_dy2 = (-n1_sq * v2x - v1y * v_cross) / denom_v1
-        dRs_dx3 = (n2_sq * v1y + v2x * v_cross) / denom_v2
-        dRs_dy3 = (-n2_sq * v1x + v2y * v_cross) / denom_v2
-        dRs_dx4 = (-n2_sq * v1y - v2x * v_cross) / denom_v2
-        dRs_dy4 = (n2_sq * v1x - v2y * v_cross) / denom_v2
+        drs_dx1 = (v1x * v_cross - n1_sq * v2y) / denom_v1
+        drs_dy1 = (n1_sq * v2x + v1y * v_cross) / denom_v1
+        drs_dx2 = (n1_sq * v2y - v1x * v_cross) / denom_v1
+        drs_dy2 = (-n1_sq * v2x - v1y * v_cross) / denom_v1
+        drs_dx3 = (n2_sq * v1y + v2x * v_cross) / denom_v2
+        drs_dy3 = (-n2_sq * v1x + v2y * v_cross) / denom_v2
+        drs_dx4 = (-n2_sq * v1y - v2x * v_cross) / denom_v2
+        drs_dy4 = (n2_sq * v1x - v2y * v_cross) / denom_v2
 
         # Residual indices.
         i_cos = 0
@@ -998,23 +998,23 @@ class LineLineAngleSinCos(BaseConstraint):
 
         return [
             # R_cos row.
-            (p1_vars[0], float(dRc_dx1), i_cos),
-            (p1_vars[1], float(dRc_dy1), i_cos),
-            (p2_vars[0], float(dRc_dx2), i_cos),
-            (p2_vars[1], float(dRc_dy2), i_cos),
-            (p3_vars[0], float(dRc_dx3), i_cos),
-            (p3_vars[1], float(dRc_dy3), i_cos),
-            (p4_vars[0], float(dRc_dx4), i_cos),
-            (p4_vars[1], float(dRc_dy4), i_cos),
+            (p1_vars[0], float(drc_dx1), i_cos),
+            (p1_vars[1], float(drc_dy1), i_cos),
+            (p2_vars[0], float(drc_dx2), i_cos),
+            (p2_vars[1], float(drc_dy2), i_cos),
+            (p3_vars[0], float(drc_dx3), i_cos),
+            (p3_vars[1], float(drc_dy3), i_cos),
+            (p4_vars[0], float(drc_dx4), i_cos),
+            (p4_vars[1], float(drc_dy4), i_cos),
             # R_sin row.
-            (p1_vars[0], float(dRs_dx1), i_sin),
-            (p1_vars[1], float(dRs_dy1), i_sin),
-            (p2_vars[0], float(dRs_dx2), i_sin),
-            (p2_vars[1], float(dRs_dy2), i_sin),
-            (p3_vars[0], float(dRs_dx3), i_sin),
-            (p3_vars[1], float(dRs_dy3), i_sin),
-            (p4_vars[0], float(dRs_dx4), i_sin),
-            (p4_vars[1], float(dRs_dy4), i_sin),
+            (p1_vars[0], float(drs_dx1), i_sin),
+            (p1_vars[1], float(drs_dy1), i_sin),
+            (p2_vars[0], float(drs_dx2), i_sin),
+            (p2_vars[1], float(drs_dy2), i_sin),
+            (p3_vars[0], float(drs_dx3), i_sin),
+            (p3_vars[1], float(drs_dy3), i_sin),
+            (p4_vars[0], float(drs_dx4), i_sin),
+            (p4_vars[1], float(drs_dy4), i_sin),
         ]
 
     def get_involved_primitive_ids(self) -> frozenset:
