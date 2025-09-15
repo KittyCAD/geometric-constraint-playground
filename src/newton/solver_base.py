@@ -2,14 +2,19 @@ import logging
 from abc import ABC, abstractmethod
 from enum import Enum
 from types import ModuleType
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Sequence, Set
 
 import networkx as nx
 import numpy as np
+from scipy.linalg import svd
 from scipy.optimize import OptimizeResult
 
 from newton.backend import Vector
-from newton.constants import CONFIG_USE_SYMB_SUB, NONZERO_RANK_TOLERANCE
+from newton.constants import (
+    CONFIG_SPLIT_DISCONNECTED,
+    CONFIG_USE_SYMB_SUB,
+    NONZERO_RANK_TOLERANCE,
+)
 from newton.constraint_validator import ConstraintValidator
 from newton.constraints import (
     Constraint,
@@ -34,15 +39,14 @@ class SystemState(Enum):
     FULLY_DETERMINED = "fully determined"
 
 
-# Configure numpy print options for debug output
-if logger.isEnabledFor(logging.DEBUG):
-    np.set_printoptions(precision=3, suppress=True, linewidth=120)
-
-
 class Solver2D(ABC):
     def __init__(
         self, primitives: Sequence[Primitive], constraints: Sequence[Constraint]
     ):
+        # Configure numpy print options for debug output
+        if logger.isEnabledFor(logging.DEBUG):
+            np.set_printoptions(precision=3, suppress=True, linewidth=200)
+
         # Build our full set of constraints: this will be the user-defined constraints
         # passed in, plus our definitional constraints from the primitives.
         all_constraints = list(constraints)
@@ -53,6 +57,11 @@ class Solver2D(ABC):
         self.primitives = primitives
         self.primitive_map = {p.id: p for p in primitives}
         self.original_constraints: Sequence[Constraint] = all_constraints
+
+        # Build a map from each primitive to the set of variable IDs that define its geometry.
+        self.element_to_vars: Dict[str, Set[str]] = {}
+        self.build_element_dependency_maps()
+
         self.active_constraints: Sequence[Constraint] = []
         self.substitution_map: Dict[str, str] = {}
         self.substitution_stats = SubstitutionStats()
@@ -60,6 +69,20 @@ class Solver2D(ABC):
         self.module: ModuleType = (
             np  # Default to numpy, can be overridden by subclasses.
         )
+
+    def build_element_dependency_maps(self) -> None:
+        """
+        Creates a map from each primitive's ID to the set of variable IDs
+        that define its geometry (including components).
+        """
+        for p in self.primitives:
+            involved_vars = set()
+            # A primitive's geometry depends on the variables of all its constituent primitives.
+            involved_ids = p.get_involved_primitive_ids()
+            for prim_id in involved_ids:
+                if prim_id in self.primitive_map:
+                    involved_vars.update(self.primitive_map[prim_id].get_variable_ids())
+            self.element_to_vars[p.id] = involved_vars
 
     def prepare_constraints(self) -> None:
         # Prepare constraints for solving, applying substitutions if enabled.
@@ -165,6 +188,7 @@ class Solver2D(ABC):
                     "substitution_map": self.substitution_map,  # Include substitution map.
                 }
             )
+
         return constraint_systems
 
     def validate_constraint_systems(self, systems: List[Dict[str, Any]]) -> None:
@@ -257,8 +281,17 @@ class Solver2D(ABC):
         self.prepare_constraints()
 
         # Step 2: Split the problem into wholly disconnected problems.
-        graph = self.build_dependency_graph()
-        constraint_systems = self.find_disconnected_systems(graph)
+        if CONFIG_SPLIT_DISCONNECTED:
+            graph = self.build_dependency_graph()
+            constraint_systems = self.find_disconnected_systems(graph)
+        else:
+            constraint_systems = [
+                {
+                    "constraints": self.active_constraints,
+                    "primitives": self.primitives,
+                    "substitution_map": self.substitution_map,
+                }
+            ]
 
         # Step 3: Validate the constraints in each disconnected system before solving.
         self.validate_constraint_systems(constraint_systems)
@@ -413,3 +446,84 @@ class Solver2D(ABC):
 
         logger.debug("Updated all primitives from final variable map.")
         return
+
+    def analyze_degrees_of_freedom(
+        self,
+        final_jacobian: np.ndarray,
+        subsystem_primitives: List[Primitive],
+        var_map: Dict[str, int],
+    ) -> Dict[str, bool]:
+        """
+        Analyses the null space of the final Jacobian to determine which
+        elements are fully constrained.
+
+        Returns:
+            A dictionary mapping primitive IDs to a boolean (True if fully constrained).
+        """
+        logger.debug("Performing degree-of-freedom analysis...")
+
+        if final_jacobian.size == 0:
+            logger.debug("Jacobian is empty. Assuming all elements are unconstrained.")
+            return {p.id: False for p in subsystem_primitives}
+
+        # Use SVD to find the null space.
+        try:
+            # Vh is the V.T matrix from U, S, V.T = svd(A)
+            _, s, vh = svd(final_jacobian)
+            tolerance = 1e-6
+            # The null space basis vectors are the rows of Vh corresponding to tiny singular values.
+            # We transpose it so each column is a DOF vector.
+            null_space_basis = vh[s < tolerance, :].T
+        except np.linalg.LinAlgError:
+            logger.error(
+                "SVD failed during DOF analysis. Cannot determine constraint status."
+            )
+            # Assume nothing is constrained if SVD fails.
+            return {p.id: False for p in subsystem_primitives}
+
+        # This dictionary will store the final status for each element.
+        element_is_constrained: Dict[str, bool] = {}
+
+        # If the null space is empty, the system is fully constrained.
+        if null_space_basis.shape[1] == 0:
+            logger.debug(
+                "Null space is empty. All elements in this subsystem are fully constrained."
+            )
+            for p in subsystem_primitives:
+                element_is_constrained[p.id] = True
+            return element_is_constrained
+
+        logger.debug(
+            f"Found {null_space_basis.shape[1]} degree(s) of freedom in this subsystem."
+        )
+
+        # Determine the mobility of each independent (root) variable.
+        root_var_is_movable: Dict[str, bool] = {}
+        independent_vars = list(var_map.keys())
+        for i, var_id in enumerate(independent_vars):
+            # The i-th row of the null_space_basis corresponds to the i-th variable.
+            # If this row has any non-zero entries, the variable participates in a DOF.
+            if np.sum(np.abs(null_space_basis[i, :])) > tolerance:
+                root_var_is_movable[var_id] = True
+            else:
+                root_var_is_movable[var_id] = False
+
+        # Propagate the mobility status to every element in the subsystem.
+        for p in subsystem_primitives:
+            is_constrained = True
+            conceptual_vars = self.element_to_vars.get(p.id, set())
+
+            if not conceptual_vars:
+                # Skip primitives with no variables (e.g., Line itself).
+                # Its status is implicitly defined by its points.
+                continue
+
+            for var_id in conceptual_vars:
+                root_var = self.find_root_variable(var_id)
+                if root_var in root_var_is_movable and root_var_is_movable[root_var]:
+                    is_constrained = False
+                    break  # Found a DOF, the element is not constrained.
+
+            element_is_constrained[p.id] = is_constrained
+
+        return element_is_constrained

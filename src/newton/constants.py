@@ -1,5 +1,8 @@
+# Split disconnected subsystems and solve them separately.
+CONFIG_SPLIT_DISCONNECTED = False
+
 # Use symbolic substitution in the solver.
-CONFIG_USE_SYMB_SUB = True
+CONFIG_USE_SYMB_SUB = False
 
 # Use sparse solver for the 2D solver.
 CONFIG_USE_SPARSE_SOLVE = True
