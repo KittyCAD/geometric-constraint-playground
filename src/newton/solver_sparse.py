@@ -1,5 +1,5 @@
 import logging
-from typing import Any, Dict, List, Mapping, Sequence
+from typing import Any, Dict, List, Mapping, Optional, Sequence
 
 import numpy as np
 from scipy import sparse
@@ -197,7 +197,7 @@ class Solver2DSparse(Solver2D):
         )
 
         if CONFIG_USE_NEWTON_FAER:
-            result = self.solve_with_newton_faer(
+            result, final_jacobian_sparse = self.solve_with_newton_faer(
                 constraints,
                 independent_vars,
                 var_map,
@@ -207,7 +207,7 @@ class Solver2DSparse(Solver2D):
             )
         else:
             # Use the original scipy least_squares method.
-            result = self.solve_with_scipy(
+            result, final_jacobian_sparse = self.solve_with_scipy(
                 constraints,
                 independent_vars,
                 initial_guess,
@@ -215,52 +215,11 @@ class Solver2DSparse(Solver2D):
                 substitution_map,
             )
 
-        # TODO: There is some cursed LLM slop repetition of other code in here, but it works.
-        # ------------------------------------------------------------------------------
-        # Get the final Jacobian at the accepted solution.
-        final_jacobian_sparse = None
-        if CONFIG_USE_NEWTON_FAER:
-            # Re-create the adapter to get the final Jacobian
-            constraint_system_for_jacobian = ConstraintSystemAdapter(
-                constraints=constraints,
-                independent_vars=independent_vars,
-                var_map=var_map,
-                initial_values=initial_values,
-                substitution_map=substitution_map,
-                solver_instance=self,
-            )
-            final_jacobian_sparse = constraint_system_for_jacobian.jacobian_sparse(
-                result.x
-            )
-        else:
-            # Re-create the scipy wrapper to get the final Jacobian
-            var_map_scipy = {var_id: i for i, var_id in enumerate(independent_vars)}
-
-            def jacobian_wrapper(independent_vars_values: np.ndarray) -> csc_matrix:
-                # TODO: We shouldn't be rebuilding this; just surface it from
-                # where it's created for real.
-                variable_values = self.build_variable_values_map(
-                    independent_vars_values,
-                    independent_vars,
-                    initial_values,
-                    substitution_map,
-                )
-                system_dict = {
-                    "constraints": constraints,
-                    "substitution_map": substitution_map,
-                }
-                jacobian = self.build_sparse_jacobian(
-                    system_dict, var_map_scipy, variable_values
-                )
-                n_vars = len(independent_vars)
-                reg_jacobian = diags([REGULARIZATION_LAMBDA] * n_vars, format="csc")
-                return csc_matrix(vstack([jacobian, reg_jacobian], format="csc"))
-
-            final_jacobian_sparse = jacobian_wrapper(result.x)
-
-        final_jacobian_dense = final_jacobian_sparse.toarray()
+        if final_jacobian_sparse is None:
+            raise ValueError("No final Jacobian captured from solver.")
 
         # Analyse our degrees of freedom based on the final Jacobian.
+        final_jacobian_dense = final_jacobian_sparse.toarray()
         constraint_status = self.analyze_degrees_of_freedom(
             final_jacobian_dense, free_primitives, var_map
         )
@@ -270,7 +229,6 @@ class Solver2DSparse(Solver2D):
         for prim_id, is_constrained in sorted(constraint_status.items()):
             status_str = "Fully Constrained" if is_constrained else "Under-constrained"
             logger.info(f"  - {prim_id}: {status_str}")
-        # ------------------------------------------------------------------------------
 
         # Run checks and update using the consolidated method from the base class.
         # This effectively fans out the final variable values through the substitution map.
@@ -317,13 +275,16 @@ class Solver2DSparse(Solver2D):
 
         logger.debug(f"Newton-Faer converged in {iterations} iterations")
 
+        # Get the final Jacobian at the solution
+        final_jacobian_sparse = constraint_system.jacobian_sparse(solution)
+
         # Create a result-like object for compatibility with existing code.
         from scipy.optimize import OptimizeResult
 
         result = OptimizeResult(
             x=solution, success=True, fun=constraint_system.residual(solution)
         )
-        return result
+        return result, final_jacobian_sparse
 
     def solve_with_scipy(
         self,
@@ -334,6 +295,9 @@ class Solver2DSparse(Solver2D):
         substitution_map: Dict[str, str],
     ):
         var_map = {var_id: i for i, var_id in enumerate(independent_vars)}
+        final_jacobian_sparse: Optional[csc_matrix] = (
+            None  # Will be captured during solving
+        )
 
         def residuals_vector(independent_vars_values: np.ndarray) -> np.ndarray:
             variable_values = self.build_variable_values_map(
@@ -352,6 +316,8 @@ class Solver2DSparse(Solver2D):
             return np.concatenate([constraint_residuals, reg_residuals])
 
         def jacobian_wrapper(independent_vars_values: np.ndarray) -> csc_matrix:
+            nonlocal final_jacobian_sparse
+
             variable_values = self.build_variable_values_map(
                 independent_vars_values,
                 independent_vars,
@@ -371,9 +337,12 @@ class Solver2DSparse(Solver2D):
             reg_jacobian = diags([REGULARIZATION_LAMBDA] * n_vars, format="csc")
 
             # Combine them vertically into the new augmented Jacobian.
-            result = vstack([jacobian, reg_jacobian], format="csc")
+            result_jacobian = csc_matrix(vstack([jacobian, reg_jacobian], format="csc"))
 
-            return csc_matrix(result)
+            # Capture the final Jacobian (this will be the last evaluation)
+            final_jacobian_sparse = result_jacobian
+
+            return result_jacobian
 
         # Do rank based system state check.
         jacobian_init = jacobian_wrapper(initial_guess)
@@ -406,4 +375,4 @@ class Solver2DSparse(Solver2D):
             verbose=2 if logger.isEnabledFor(logging.DEBUG) else 0,
         )
 
-        return result
+        return result, final_jacobian_sparse
