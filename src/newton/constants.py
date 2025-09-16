@@ -4,9 +4,12 @@ CONFIG_SPLIT_DISCONNECTED = False
 # Use symbolic substitution in the solver.
 CONFIG_USE_SYMB_SUB = False
 
+#  Validate.
+CONFIG_VALIDATE_CONSTRAINTS = False
+
 # Use sparse solver for the 2D solver.
 CONFIG_USE_SPARSE_SOLVE = True
-CONFIG_USE_NEWTON_FAER = True
+CONFIG_USE_NEWTON_FAER = False
 CONFIG_USE_REGULARIZATION = True
 
 # For Tikhonov regularization

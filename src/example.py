@@ -190,7 +190,7 @@ def constrain_rectangles():
         PointPointEuclideanDistance(p5, p6, distance=4.0),
         PointPointEuclideanDistance(p5, p8, distance=4.0),
         # Add a duplicate constraint to test conflict detection.
-        # PointPointEuclideanDistance(p5, p6, distance=4.0),  # Duplicate
+        PointPointEuclideanDistance(p5, p6, distance=5.0),  # Duplicate and conflicting.
         # Add a conflicting constraint to test conflict detection.
         # LineHorizontal(line=l_right2),  # This should conflict with the vertical line.
     ]
@@ -432,7 +432,7 @@ def constrain_simple_arc():
         PointFixed(point=center),
         ArcRadius(arc=arc, radius=r),
         PointPointXDistance(center, start, distance=0.0),
-        PointPointXDistance(center, end, distance=1.0),
+        # PointPointXDistance(center, end, distance=1.0),
     ]
 
     # Plot initial state.
@@ -526,12 +526,12 @@ if __name__ == "__main__":
     profiler.start()
 
     constrain_rectangles()
-    constrain_parallel_offset()
-    constrain_underdetermined()
-    constrain_simple_circle()
-    constrain_tangent_circle_to_line()
-    constrain_simple_arc()
-    constrain_perpendicular_with_shared_vertex()
+    # constrain_parallel_offset()
+    # constrain_underdetermined()
+    # constrain_simple_circle()
+    # constrain_tangent_circle_to_line()
+    # constrain_simple_arc()
+    # constrain_perpendicular_with_shared_vertex()
 
     profiler.stop()
     profiler.print()
