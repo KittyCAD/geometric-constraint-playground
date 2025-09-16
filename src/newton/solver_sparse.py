@@ -218,6 +218,17 @@ class Solver2DSparse(Solver2D):
         if final_jacobian_sparse is None:
             raise ValueError("No final Jacobian captured from solver.")
 
+        # Run checks and update using the consolidated method from the base class.
+        # This effectively fans out the final variable values through the substitution map.
+        final_variable_values = self.fan_out_solved_variable_values(
+            result, independent_vars, substitution_map
+        )
+
+        # Check overall convergence; did we satisfy all constraints.
+        self.update_primitives_from_map(final_variable_values)
+        self.assess_solver_result(final_variable_values, constraints)
+
+        # More status checking; look for element state.
         # Analyse our degrees of freedom based on the final Jacobian.
         final_jacobian_dense = final_jacobian_sparse.toarray()
         constraint_status = self.analyze_degrees_of_freedom(
@@ -230,13 +241,17 @@ class Solver2DSparse(Solver2D):
             status_str = "Fully Constrained" if is_constrained else "Under-constrained"
             logger.info(f"  - {prim_id}: {status_str}")
 
-        # Run checks and update using the consolidated method from the base class.
-        # This effectively fans out the final variable values through the substitution map.
-        final_variable_values = self.fan_out_solved_variable_values(
-            result, independent_vars, substitution_map
+        # Then look for overconstrained primitives.
+        overconstrained_elements = self.identify_overconstrained_elements(
+            constraints, final_variable_values, SOLVER_CONVERGENCE_TOLERANCE * 100
         )
-        self.update_primitives_from_map(final_variable_values)
-        self.assess_solver_result(final_variable_values, constraints)
+
+        if overconstrained_elements:
+            logger.info("Overconstrained elements in subsystem:")
+
+            for prim_id, details in sorted(overconstrained_elements.items()):
+                logger.info(f"  - {prim_id}: {details}")
+
         return
 
     def solve_with_newton_faer(

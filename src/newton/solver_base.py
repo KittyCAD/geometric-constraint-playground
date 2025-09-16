@@ -13,6 +13,7 @@ from newton.backend import Vector
 from newton.constants import (
     CONFIG_SPLIT_DISCONNECTED,
     CONFIG_USE_SYMB_SUB,
+    CONFIG_VALIDATE_CONSTRAINTS,
     NONZERO_RANK_TOLERANCE,
 )
 from newton.constraint_validator import ConstraintValidator
@@ -294,7 +295,8 @@ class Solver2D(ABC):
             ]
 
         # Step 3: Validate the constraints in each disconnected system before solving.
-        self.validate_constraint_systems(constraint_systems)
+        if CONFIG_VALIDATE_CONSTRAINTS:
+            self.validate_constraint_systems(constraint_systems)
 
         # Step 4: If validation passes, proceed with the numerical solve.
         logger.debug(
@@ -527,3 +529,24 @@ class Solver2D(ABC):
             element_is_constrained[p.id] = is_constrained
 
         return element_is_constrained
+
+    def identify_overconstrained_elements(
+        self,
+        constraints: List[Constraint],
+        variable_values: Dict[str, float],
+        tolerance: float = 1e-5,
+    ) -> Dict[str, bool]:
+        """
+        Identify elements involved in constraint violations that suggest overconstraint.
+        """
+        overconstrained_elements = set()
+
+        # Find constraints with large residuals (unsatisfiable).
+        for constraint in constraints:
+            residual = constraint.get_residual(variable_values)
+            if np.max(np.abs(residual)) > tolerance:
+                # This constraint can't be satisfied; elements involved may be overconstrained.
+                involved_primitives = constraint.get_involved_primitive_ids()
+                overconstrained_elements.update(involved_primitives)
+
+        return {p.id: p.id in overconstrained_elements for p in self.primitives}
